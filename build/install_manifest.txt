@@ -1,0 +1,2 @@
+/usr/bin/4yshot
+/usr/share/applications/4yshot.desktop

@@ -1,0 +1,27 @@
+<RCC>
+    <qresource prefix="/">
+        <file>themes/modern.qss</file>
+        <file>icons/tool-rectangle.svg</file>
+        <file>icons/shape-ellipse.svg</file>
+        <file>icons/tool-arrow.svg</file>
+        <file>icons/tool-line.svg</file>
+        <file>icons/tool-free-draw.svg</file>
+        <file>icons/tool-highlight.svg</file>
+        <file>icons/tool-text.svg</file>
+        <file>icons/tool-serial-number.svg</file>
+        <file>icons/tool-filter.svg</file>
+        <file>icons/tool-spotlight.svg</file>
+        <file>icons/pinned-window-border.svg</file>
+        <file>icons/pushpin.svg</file>
+        <file>icons/tool-recognize-text.svg</file>
+        <file>icons/image-stitching.svg</file>
+        <file>icons/undo.svg</file>
+        <file>icons/redo.svg</file>
+        <file>icons/copy.svg</file>
+        <file>icons/save.svg</file>
+        <file>icons/close.svg</file>
+        <file>icons/check.svg</file>
+        <file>icons/spin-up.svg</file>
+        <file>icons/spin-down.svg</file>
+    </qresource>
+</RCC>

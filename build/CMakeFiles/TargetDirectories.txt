@@ -1,0 +1,12 @@
+/home/henvei/桌面/4YShot/build/CMakeFiles/KF6GlobalAccel_QCH.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/4yshot.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/package.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/package_source.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/edit_cache.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/rebuild_cache.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/list_install_components.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/install.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/install/local.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/install/strip.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/4yshot_autogen_timestamp_deps.dir
+/home/henvei/桌面/4YShot/build/CMakeFiles/4yshot_autogen.dir

@@ -1,0 +1,89 @@
+cmake_minimum_required(VERSION 3.20)
+project(4yshot VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets DBus Network Concurrent)
+find_package(KF6GlobalAccel QUIET)
+
+set(SOURCES
+    src/main.cpp
+    src/core/config.h
+    src/core/config.cpp
+    src/core/app.h
+    src/core/app.cpp
+    src/core/ocr_service.h
+    src/core/ocr_service.cpp
+    src/platform/capture_manager.h
+    src/platform/capture_manager.cpp
+    src/annotation/shapes.h
+    src/annotation/shapes.cpp
+    src/annotation/annotation_engine.h
+    src/annotation/annotation_engine.cpp
+    src/ui/selection_model.h
+    src/ui/selection_model.cpp
+    src/ui/magnifier.h
+    src/ui/magnifier.cpp
+    src/ui/toolbar.h
+    src/ui/toolbar.cpp
+    src/ui/overlay_widget.h
+    src/ui/overlay_widget.cpp
+    src/ui/icon_helper.h
+    src/ui/icon_helper.cpp
+    src/ui/ocr_dialog.h
+    src/ui/ocr_dialog.cpp
+    src/ui/long_capture_dialog.h
+    src/ui/long_capture_dialog.cpp
+    src/ui/text_selection_bubble.h
+    src/ui/text_selection_bubble.cpp
+    src/pin/pin_window.h
+    src/pin/pin_window.cpp
+    resources/4yshot.qrc
+)
+
+add_executable(4yshot ${SOURCES})
+
+target_include_directories(4yshot PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(4yshot PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::DBus
+    Qt6::Network
+    Qt6::Concurrent
+)
+
+if(KF6GlobalAccel_FOUND)
+    message(STATUS "Enabling KDE Plasma 6 KGlobalAccel support")
+    target_link_libraries(4yshot PRIVATE KF6::GlobalAccel)
+    target_compile_definitions(4yshot PRIVATE HAS_KF6_GLOBALACCEL)
+endif()
+
+include(GNUInstallDirs)
+
+install(TARGETS 4yshot RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES resources/4yshot.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+)
+
+# Build a native Debian package with: cpack -G DEB
+set(CPACK_GENERATOR "DEB")
+set(CPACK_PACKAGE_NAME "4yshot")
+set(CPACK_PACKAGE_VENDOR "4YShot")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Wayland screenshot and annotation tool")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_CONTACT "4YShot maintainers")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "4YShot maintainers")
+set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "tesseract-ocr, tesseract-ocr-chi-sim, tesseract-ocr-eng")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+include(CPack)
