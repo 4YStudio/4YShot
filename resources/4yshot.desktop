@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=4YShot
-Comment=Wayland screenshot and annotation tool
-Exec=4yshot
-Terminal=false
-Categories=Utility;Graphics;
-StartupNotify=false
