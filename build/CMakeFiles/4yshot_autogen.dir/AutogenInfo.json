@@ -347,6 +347,12 @@
 			null
 		],
 		[
+			"/home/henvei/\u684c\u9762/4YShot/src/core/clipboard_util.h",
+			"MU",
+			"PRMOGMWJPH/moc_clipboard_util.cpp",
+			null
+		],
+		[
 			"/home/henvei/\u684c\u9762/4YShot/src/core/config.h",
 			"MU",
 			"PRMOGMWJPH/moc_config.cpp",
@@ -368,6 +374,12 @@
 			"/home/henvei/\u684c\u9762/4YShot/src/platform/capture_manager.h",
 			"MU",
 			"36A7VMLXJR/moc_capture_manager.cpp",
+			null
+		],
+		[
+			"/home/henvei/\u684c\u9762/4YShot/src/platform/window_keep_above.h",
+			"MU",
+			"36A7VMLXJR/moc_window_keep_above.cpp",
 			null
 		],
 		[
@@ -504,6 +516,11 @@
 			null
 		],
 		[ "/home/henvei/\u684c\u9762/4YShot/src/core/app.cpp", "MU", null ],
+		[
+			"/home/henvei/\u684c\u9762/4YShot/src/core/clipboard_util.cpp",
+			"MU",
+			null
+		],
 		[ "/home/henvei/\u684c\u9762/4YShot/src/core/config.cpp", "MU", null ],
 		[
 			"/home/henvei/\u684c\u9762/4YShot/src/core/ocr_service.cpp",
@@ -514,6 +531,11 @@
 		[ "/home/henvei/\u684c\u9762/4YShot/src/pin/pin_window.cpp", "MU", null ],
 		[
 			"/home/henvei/\u684c\u9762/4YShot/src/platform/capture_manager.cpp",
+			"MU",
+			null
+		],
+		[
+			"/home/henvei/\u684c\u9762/4YShot/src/platform/window_keep_above.cpp",
 			"MU",
 			null
 		],

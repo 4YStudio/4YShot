@@ -14,12 +14,16 @@ set(SOURCES
     src/main.cpp
     src/core/config.h
     src/core/config.cpp
+    src/core/clipboard_util.h
+    src/core/clipboard_util.cpp
     src/core/app.h
     src/core/app.cpp
     src/core/ocr_service.h
     src/core/ocr_service.cpp
     src/platform/capture_manager.h
     src/platform/capture_manager.cpp
+    src/platform/window_keep_above.h
+    src/platform/window_keep_above.cpp
     src/annotation/shapes.h
     src/annotation/shapes.cpp
     src/annotation/annotation_engine.h
@@ -71,6 +75,16 @@ include(GNUInstallDirs)
 install(TARGETS 4yshot RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES resources/4yshot.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+)
+
+# Register a user-local authorization entry pointing at the dev build
+# artifact so `./build/4yshot` can also use the restricted interface.
+add_custom_command(TARGET 4yshot POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DFOURYSHOT_EXE=$<TARGET_FILE:4yshot>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ensure-dev-kwin-auth.cmake
+    COMMENT "Registering KWin screenshot authorization for the dev build"
+    VERBATIM
 )
 
 # Build a native Debian package with: cpack -G DEB

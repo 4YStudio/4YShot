@@ -7,6 +7,7 @@
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QElapsedTimer>
+#include <QPainter>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QJsonDocument>
@@ -23,7 +24,6 @@
 namespace fouryshot::platform {
 
 CaptureManager::CaptureManager(QObject* parent) : QObject(parent) {
-    warmUp();
 }
 
 void CaptureManager::warmUp() {
@@ -57,6 +57,19 @@ bool CaptureManager::captureDesktop(
     }
     outCombinedGeometry = combined;
 
+    // Fast path: raw per-screen pixels over the authorized KWin ScreenShot2
+    // interface. No helper process, no PNG encode/decode.
+    QElapsedTimer fastTimer;
+    fastTimer.start();
+    if (captureViaKWinScreens(outPixmap, outImage, combined, outScreens)) {
+        qInfo() << "[4YShot Performance] KWin full-desktop capture:" << fastTimer.elapsed() << "ms"
+                << "Canvas:" << outPixmap.size()
+                << "Scale:" << (outScreens.isEmpty() ? 0.0 : outScreens.constFirst().dpr);
+        return true;
+    }
+
+    // Fallback: spawn Spectacle (slower: process startup + PNG round-trip).
+    warmUp();
     bool ok = captureViaSpectacle(outPixmap, outImage);
     if (!ok || outPixmap.isNull()) {
         return false;
@@ -77,6 +90,69 @@ bool CaptureManager::captureDesktop(
     }
 
     return true;
+}
+
+bool CaptureManager::captureViaKWinScreens(
+    QPixmap& outPixmap,
+    std::shared_ptr<QImage>& outImage,
+    const QRect& combinedGeometry,
+    QList<ScreenTarget>& outScreens
+) {
+    if (outScreens.isEmpty() || combinedGeometry.isEmpty()) return false;
+
+    QList<QImage> images;
+    images.reserve(outScreens.size());
+    for (auto& target : outScreens) {
+        if (!target.screen || target.logicalGeometry.isEmpty()) return false;
+        QImage image;
+        QString error;
+        if (!captureViaKWinArea(target.logicalGeometry, image, &error)) {
+            qInfo() << "KWin fast capture unavailable on" << target.name << ":" << error
+                    << "- falling back to Spectacle";
+            return false;
+        }
+        const qreal scaleX = static_cast<qreal>(image.width()) / target.logicalGeometry.width();
+        const qreal scaleY = static_cast<qreal>(image.height()) / target.logicalGeometry.height();
+        if (scaleX <= 0.0 || std::abs(scaleX - scaleY) > 0.02) {
+            qInfo() << "Anisotropic KWin area capture on" << target.name
+                    << "(" << scaleX << "x" << scaleY << ") - falling back to Spectacle";
+            return false;
+        }
+        // Mixed-DPI desktops are supported here: each screen keeps its own
+        // scale and is placed on the canvas at its logical offset scaled by
+        // its own DPI. This keeps every screen at native resolution (Spectacle
+        // would upscale the whole desktop to a single uniform factor instead,
+        // producing a blurry canvas on mixed-DPI setups).
+        target.dpr = scaleX;
+        images.append(image);
+    }
+
+    int canvasWidth = 0;
+    int canvasHeight = 0;
+    for (int i = 0; i < outScreens.size(); ++i) {
+        auto& target = outScreens[i];
+        const QPoint physicalOrigin(
+            std::round((target.logicalGeometry.x() - combinedGeometry.x()) * target.dpr),
+            std::round((target.logicalGeometry.y() - combinedGeometry.y()) * target.dpr)
+        );
+        target.physicalGeometry = QRect(physicalOrigin, images[i].size());
+        canvasWidth = std::max(canvasWidth, physicalOrigin.x() + images[i].width());
+        canvasHeight = std::max(canvasHeight, physicalOrigin.y() + images[i].height());
+    }
+
+    QImage canvas(canvasWidth, canvasHeight, QImage::Format_ARGB32_Premultiplied);
+    if (canvas.isNull()) return false;
+    canvas.fill(Qt::transparent);
+    QPainter painter(&canvas);
+    for (int i = 0; i < outScreens.size(); ++i) {
+        painter.drawImage(outScreens[i].physicalGeometry.topLeft(), images[i]);
+    }
+    painter.end();
+
+    auto image = std::make_shared<QImage>(canvas);
+    outPixmap = QPixmap::fromImage(*image);
+    outImage = std::move(image);
+    return !outPixmap.isNull();
 }
 
 bool CaptureManager::captureViaSpectacle(QPixmap& outPixmap, std::shared_ptr<QImage>& outImage) {
@@ -135,8 +211,15 @@ bool CaptureManager::captureViaKWinArea(const QRect& logicalRegion, QImage& outI
     timer.start();
     const QDBusMessage reply = QDBusConnection::sessionBus().call(request, QDBus::Block, 5000);
     if (reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty()) {
-        reportFailure(QStringLiteral("KWin D-Bus 请求被拒绝 [%1]：%2")
-                          .arg(reply.errorName(), reply.errorMessage()));
+        if (reply.errorName() == QLatin1String("org.kde.KWin.ScreenShot2.Error.NoAuthorized")) {
+            reportFailure(QStringLiteral(
+                "KWin 未授权本进程截图：长截图依赖 KWin 受限接口，"
+                "请安装 DEB 包或重新执行构建以注册授权，然后重启程序；"
+                "可用 --probe-capture 自检"));
+        } else {
+            reportFailure(QStringLiteral("KWin D-Bus 请求被拒绝 [%1]：%2")
+                              .arg(reply.errorName(), reply.errorMessage()));
+        }
         closeReader();
         return false;
     }
@@ -235,7 +318,7 @@ bool CaptureManager::captureViaSpectacleImage(QImage& outImage) {
         return false;
     }
 
-    if (!process.waitForFinished(4000) || process.exitCode() != 0) {
+    if (!process.waitForFinished(8000) || process.exitCode() != 0) {
         qWarning() << "Spectacle failed or timed out. Exit code:" << process.exitCode()
                    << "Error:" << process.errorString()
                    << "Stderr:" << process.readAllStandardError();

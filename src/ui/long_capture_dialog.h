@@ -21,7 +21,8 @@ public:
     void replaceSeedFrame(const QImage& segment);
     bool recordFrame(const QImage& segment, qint64 captureTimeMs);
     bool hasPendingFrames() const;
-    void mergePendingFrames();
+    // keepScrolling=true: 滚动采集中途合并以释放缓存，不切换滚动状态/按钮可见性
+    void mergePendingFrames(bool keepScrolling = false);
     QImage compositeImage() const;
     void showMessage(const QString& message);
     void setScrolling(bool scrolling);

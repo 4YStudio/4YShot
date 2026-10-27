@@ -22,8 +22,11 @@
 - KDE Plasma 6
 - Wayland 会话
 - Qt 6.8 或更高版本
-- KDE Spectacle；截图时需能调用 `spectacle` 命令
+- KDE Spectacle（作为 KWin 接口不可用时的后备截图方案）
+- wl-clipboard（复制图片的剪贴板持久化）
 - Tesseract OCR 与简体中文、英文语言数据（使用 OCR 时需要）
+
+首屏截图默认通过 KWin 的 `org.kde.KWin.ScreenShot2` 受限接口直接读取原始像素（毫秒级）；该接口需要授权（见下方「长截图的 KWin 授权说明」，构建或安装 DEB 包时会自动注册），未授权或失败时自动回退到 Spectacle 子进程方案。
 
 在 Debian 13 上安装构建和运行所需组件：
 
@@ -34,10 +37,11 @@ sudo apt install -y \
   qt6-base-dev qt6-base-dev-tools \
   libkf6globalaccel-dev \
   spectacle \
+  wl-clipboard \
   tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng
 ```
 
-`libkf6globalaccel-dev` 用于启用 KDE 全局快捷键集成；如果构建时没有找到该库，程序仍可构建，但该集成不会启用。其他系统上的包名可能不同。
+`libkf6globalaccel-dev` 用于启用 KDE 全局快捷键集成；如果构建时没有找到该库，程序仍可构建，但该集成不会启用。`wl-clipboard` 提供复制图片的持久化支持（截图进程退出后剪贴板内容仍可粘贴），缺失时复制功能退化为依赖桌面剪贴板管理器。其他系统上的包名可能不同。
 
 ## 从源码构建
 
@@ -53,6 +57,22 @@ cmake --build build
 ```bash
 ./build/4yshot
 ```
+
+### 长截图的 KWin 授权说明
+
+滚动长截图通过 KWin 的受限 D-Bus 接口 `org.kde.KWin.ScreenShot2` 持续抓取选区。KWin 只授权给 desktop 文件中声明了 `X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2`、且 `Exec` 与进程可执行文件路径一致的应用：
+
+- 每次执行 `cmake --build build` 后，构建系统会自动在 `~/.local/share/applications/4yshot-dev.desktop` 注册指向本次构建产物的授权条目（设了 `NoDisplay`，不会出现在应用菜单），开发版因此可以直接使用长截图；
+- 通过 DEB 包安装的版本自带的 desktop 文件已包含授权声明，无需额外操作；
+- 若长截图提示 “KWin 未授权本进程截图”，请重新构建并重启 4YShot；也可运行 `4yshot --probe-capture` 自检 KWin 区域截图链路，输出 `OK` 即正常。
+
+## 贴图置顶说明
+
+Wayland 的核心协议不提供任何让客户端控制窗口堆叠顺序的接口，KWin 会直接忽略 Qt 的“总在最前”窗口提示，因此贴图窗口默认会被其他普通窗口盖住。4YShot 在启动时通过 `org.kde.kwin.Scripting` D-Bus 接口注册一个小型 KWin 脚本，把本程序的窗口标记为“保持在其他窗口之上”（keep above），并对之后新建的贴图窗口持续生效。
+
+- 脚本写在 `~/.local/share/kwin/scripts/4yshot-keep-above/`，只匹配本程序的 appId（`org.fouryshot.FourYShot`），不会影响其他程序；
+- 该脚本不会开机自动加载，只在 4YShot 运行时由程序注册，本会话内常驻；若被意外卸载，重新触发一次截图或贴图即可恢复；
+- X11 下无需这套机制（Qt 的置顶标志本身有效）；非 KDE 的 Wayland 合成器没有等价接口，贴图仍可能出现被遮挡的情况。
 
 ## 构建和安装 DEB 包
 
@@ -108,4 +128,4 @@ sudo apt remove 4yshot
 
 ## 问题反馈
 
-遇到问题时，请提供发行版、桌面环境、显示服务器（Wayland 或 X11）、运行方式，以及终端中的错误信息。非 Debian 13 + KDE Plasma 6 + Wayland 环境的问题可能需要额外适配。
+遇到问题时，请提供发行版、桌面环境、显示服务器（Wayland 或 X11）、运行方式，以及终端中的错误信息；截图类问题建议附上 `4yshot --probe-capture` 的输出。非 Debian 13 + KDE Plasma 6 + Wayland 环境的问题可能需要额外适配。

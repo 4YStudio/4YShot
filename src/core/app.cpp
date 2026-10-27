@@ -11,11 +11,13 @@
 #include <QTimer>
 #include <QScreen>
 #include <QGuiApplication>
+#include <QTextStream>
 #include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
 #include <cmath>
 #include "config.h"
 #include "../pin/pin_window.h"
+#include "../platform/window_keep_above.h"
 
 #ifdef HAS_KF6_GLOBALACCEL
 #include <KGlobalAccel>
@@ -65,12 +67,12 @@ App::App(int& argc, char** argv) {
 
     // Set application icon
     m_qapp->setWindowIcon(QIcon(":/icons/tool-recognize-text.svg"));
-
-    // Pre-warm capture backend non-blockingly
-    m_captureManager.warmUp();
 }
 
 App::~App() {
+    // The KWin keep-above script is intentionally left loaded: it only targets
+    // this application's appId, and unloading it on exit would strip pin
+    // windows of their stacking guarantee while a daemon still owns them.
     if (m_ipcServer) {
         m_ipcServer->close();
     }
@@ -86,16 +88,53 @@ int App::run() {
     QCommandLineOption daemonOpt(QStringList() << "d" << "daemon", "作为常驻守护进程在后台启动，并在系统托盘显示。");
     QCommandLineOption captureOpt(QStringList() << "c" << "capture", "立即触发屏幕截图。");
     QCommandLineOption pinOpt(QStringList() << "p" << "pin", "从剪贴板粘贴图像并贴图置顶到屏幕。");
+    QCommandLineOption probeCaptureOpt(QStringList() << "probe-capture");
+    probeCaptureOpt.setDescription("诊断：验证 KWin 区域截图授权与链路后退出。");
+    probeCaptureOpt.setFlags(QCommandLineOption::HiddenFromHelp);
 
     parser.addOption(daemonOpt);
     parser.addOption(captureOpt);
     parser.addOption(pinOpt);
+    parser.addOption(probeCaptureOpt);
 
     parser.process(*m_qapp);
+
+    if (parser.isSet(probeCaptureOpt)) {
+        const QPoint origin = QGuiApplication::primaryScreen()->geometry().topLeft();
+        QImage probeImage;
+        QString probeError;
+        if (platform::CaptureManager::captureRegionImage(QRect(origin, QSize(64, 64)), probeImage, &probeError)) {
+            qInfo() << "KWin 区域截图自检成功:" << probeImage.size();
+            QTextStream(stdout) << "OK " << probeImage.width() << "x" << probeImage.height() << Qt::endl;
+        } else {
+            qWarning() << "KWin 区域截图自检失败:" << probeError;
+            QTextStream(stdout) << "FAIL " << probeError << Qt::endl;
+            return 1;
+        }
+
+        QElapsedTimer fullTimer;
+        fullTimer.start();
+        QPixmap fullDesktop;
+        std::shared_ptr<QImage> fullDesktopImage;
+        QRect combinedGeometry;
+        QList<platform::ScreenTarget> screens;
+        const bool fullOk = m_captureManager.captureDesktop(
+            fullDesktop, fullDesktopImage, combinedGeometry, screens);
+        QTextStream(stdout) << "FULL-CAPTURE "
+                            << (fullOk ? "OK" : "FAIL")
+                            << " " << fullTimer.elapsed() << "ms"
+                            << " " << fullDesktop.width() << "x" << fullDesktop.height()
+                            << Qt::endl;
+        return fullOk ? 0 : 1;
+    }
 
     bool isDaemon = parser.isSet(daemonOpt);
     bool isCapture = parser.isSet(captureOpt);
     bool isPin = parser.isSet(pinOpt);
+
+    // Wayland gives clients no control over stacking order, so pin windows need
+    // a KWin-side "keep above" flag or other applications simply cover them.
+    platform::installKeepAboveHandler();
 
     // If neither is explicitly passed, and not daemon, default to capture
     if (!isDaemon && !isPin) {
@@ -371,7 +410,7 @@ void App::onLongCaptureRequested(const QImage& firstSegment, const QRect& global
         connect(m_longCaptureWatcher, &QFutureWatcher<QImage>::finished,
                 this, &App::onLongCaptureFrameReady);
     }
-    m_longCapturePollTimer->setInterval(250);
+    m_longCapturePollTimer->setInterval(120);
     m_longCapturePollTimer->start();
 }
 
@@ -414,7 +453,7 @@ void App::onLongCaptureFrameReady() {
         if (m_longCaptureScrolling) {
             captureNextLongSegment();
         } else {
-            m_longCapturePollTimer->setInterval(300);
+            m_longCapturePollTimer->setInterval(150);
             m_longCapturePollTimer->start();
         }
         return;
@@ -423,7 +462,7 @@ void App::onLongCaptureFrameReady() {
     const QImage segment = desktopImage;
     if (segment.size().isEmpty()) {
         m_longCapturePanel->showMessage("KWin 返回的选区图像为空");
-        m_longCapturePollTimer->setInterval(500);
+        m_longCapturePollTimer->setInterval(300);
         m_longCapturePollTimer->start();
         return;
     }
@@ -438,7 +477,7 @@ void App::onLongCaptureFrameReady() {
         m_longCaptureSeedPending = false;
         m_longCapturePanel->showMessage(QString("首帧已清理 · 选区 %1x%2 · 截图 %3 ms · 等待滚动")
                                             .arg(segment.width()).arg(segment.height()).arg(captureTimeMs));
-        m_longCapturePollTimer->setInterval(250);
+        m_longCapturePollTimer->setInterval(120);
         m_longCapturePollTimer->start();
         return;
     }
@@ -456,14 +495,14 @@ void App::onLongCaptureFrameReady() {
         m_longCaptureScrolling = false;
         m_longCapturePanel->setScrolling(false);
         if (m_longCapturePanel->hasPendingFrames()) m_longCapturePanel->mergePendingFrames();
-        m_longCapturePollTimer->setInterval(700);
+        m_longCapturePollTimer->setInterval(400);
         m_longCapturePollTimer->start();
     } else if (m_longCaptureScrolling) {
         // Chain captures as soon as the previous one completes. This avoids
         // timer drift and keeps collecting while the user is actively scrolling.
         captureNextLongSegment();
     } else {
-        m_longCapturePollTimer->setInterval(250);
+        m_longCapturePollTimer->setInterval(120);
         m_longCapturePollTimer->start();
     }
 }

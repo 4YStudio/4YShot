@@ -13,11 +13,10 @@
 #include <algorithm>
 #include <unordered_set>
 #include <limits>
-#include <QProcess>
-#include <QBuffer>
 #include "ocr_dialog.h"
 #include "../pin/pin_window.h"
 #include "../core/app.h"
+#include "../core/clipboard_util.h"
 
 namespace fouryshot::ui {
 
@@ -1257,25 +1256,9 @@ void OverlayWidget::onCopy() {
         QClipboard* clipboard = QGuiApplication::clipboard();
         clipboard->setPixmap(result);
         clipboard->setImage(result.toImage());
-
-        // For Wayland session clipboard persistence across process exit:
-        // Use wl-copy to pipe lossless PNG data
-        QByteArray pngData;
-        QBuffer buffer(&pngData);
-        buffer.open(QIODevice::WriteOnly);
-        result.toImage().save(&buffer, "PNG");
-        buffer.close();
-
-        QProcess* wlProc = new QProcess();
-        wlProc->start("wl-copy", {"-t", "image/png"});
-        if (wlProc->waitForStarted(500)) {
-            wlProc->write(pngData);
-            wlProc->closeWriteChannel();
-            QObject::connect(wlProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                             wlProc, &QObject::deleteLater);
-        } else {
-            wlProc->deleteLater();
-        }
+        // This process quits right after copying; hand the image to wl-copy's
+        // daemon so the selection survives the exit (see clipboard_util.cpp).
+        core::persistClipboardImage(result.toImage());
     }
     emit captureCompleted();
 }

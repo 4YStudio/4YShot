@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=4YShot
+Comment=Wayland screenshot and annotation tool
+# Keep this path in sync with the CPack DEB install prefix (/usr). KWin only
+# authorizes the restricted org.kde.KWin.ScreenShot2 interface (long capture)
+# when the caller's executable path matches this Exec key.
+Exec=/usr/bin/4yshot
+Terminal=false
+Categories=Utility;Graphics;
+StartupNotify=false
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

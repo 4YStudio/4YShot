@@ -79,6 +79,14 @@ build CMakeFiles/4yshot.dir/src/core/config.cpp.o: CXX_COMPILER__4yshot_unscanne
   OBJECT_DIR = CMakeFiles/4yshot.dir
   OBJECT_FILE_DIR = CMakeFiles/4yshot.dir/src/core
 
+build CMakeFiles/4yshot.dir/src/core/clipboard_util.cpp.o: CXX_COMPILER__4yshot_unscanned_Release /home/henvei/桌面/4YShot/src/core/clipboard_util.cpp || cmake_object_order_depends_target_4yshot
+  DEFINES = -DHAS_KF6_GLOBALACCEL -DQT_CONCURRENT_LIB -DQT_CORE_LIB -DQT_DBUS_LIB -DQT_GUI_LIB -DQT_NETWORK_LIB -DQT_NO_DEBUG -DQT_WIDGETS_LIB
+  DEP_FILE = CMakeFiles/4yshot.dir/src/core/clipboard_util.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=gnu++20
+  INCLUDES = -I/home/henvei/桌面/4YShot/build/4yshot_autogen/include -I/home/henvei/桌面/4YShot/src -isystem /usr/include/x86_64-linux-gnu/qt6/QtCore -isystem /usr/include/x86_64-linux-gnu/qt6 -isystem /usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++ -isystem /usr/include/x86_64-linux-gnu/qt6/QtGui -isystem /usr/include/x86_64-linux-gnu/qt6/QtWidgets -isystem /usr/include/x86_64-linux-gnu/qt6/QtDBus -isystem /usr/include/x86_64-linux-gnu/qt6/QtNetwork -isystem /usr/include/x86_64-linux-gnu/qt6/QtConcurrent -isystem /usr/include/KF6/KGlobalAccel
+  OBJECT_DIR = CMakeFiles/4yshot.dir
+  OBJECT_FILE_DIR = CMakeFiles/4yshot.dir/src/core
+
 build CMakeFiles/4yshot.dir/src/core/app.cpp.o: CXX_COMPILER__4yshot_unscanned_Release /home/henvei/桌面/4YShot/src/core/app.cpp || cmake_object_order_depends_target_4yshot
   DEFINES = -DHAS_KF6_GLOBALACCEL -DQT_CONCURRENT_LIB -DQT_CORE_LIB -DQT_DBUS_LIB -DQT_GUI_LIB -DQT_NETWORK_LIB -DQT_NO_DEBUG -DQT_WIDGETS_LIB
   DEP_FILE = CMakeFiles/4yshot.dir/src/core/app.cpp.o.d
@@ -98,6 +106,14 @@ build CMakeFiles/4yshot.dir/src/core/ocr_service.cpp.o: CXX_COMPILER__4yshot_uns
 build CMakeFiles/4yshot.dir/src/platform/capture_manager.cpp.o: CXX_COMPILER__4yshot_unscanned_Release /home/henvei/桌面/4YShot/src/platform/capture_manager.cpp || cmake_object_order_depends_target_4yshot
   DEFINES = -DHAS_KF6_GLOBALACCEL -DQT_CONCURRENT_LIB -DQT_CORE_LIB -DQT_DBUS_LIB -DQT_GUI_LIB -DQT_NETWORK_LIB -DQT_NO_DEBUG -DQT_WIDGETS_LIB
   DEP_FILE = CMakeFiles/4yshot.dir/src/platform/capture_manager.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=gnu++20
+  INCLUDES = -I/home/henvei/桌面/4YShot/build/4yshot_autogen/include -I/home/henvei/桌面/4YShot/src -isystem /usr/include/x86_64-linux-gnu/qt6/QtCore -isystem /usr/include/x86_64-linux-gnu/qt6 -isystem /usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++ -isystem /usr/include/x86_64-linux-gnu/qt6/QtGui -isystem /usr/include/x86_64-linux-gnu/qt6/QtWidgets -isystem /usr/include/x86_64-linux-gnu/qt6/QtDBus -isystem /usr/include/x86_64-linux-gnu/qt6/QtNetwork -isystem /usr/include/x86_64-linux-gnu/qt6/QtConcurrent -isystem /usr/include/KF6/KGlobalAccel
+  OBJECT_DIR = CMakeFiles/4yshot.dir
+  OBJECT_FILE_DIR = CMakeFiles/4yshot.dir/src/platform
+
+build CMakeFiles/4yshot.dir/src/platform/window_keep_above.cpp.o: CXX_COMPILER__4yshot_unscanned_Release /home/henvei/桌面/4YShot/src/platform/window_keep_above.cpp || cmake_object_order_depends_target_4yshot
+  DEFINES = -DHAS_KF6_GLOBALACCEL -DQT_CONCURRENT_LIB -DQT_CORE_LIB -DQT_DBUS_LIB -DQT_GUI_LIB -DQT_NETWORK_LIB -DQT_NO_DEBUG -DQT_WIDGETS_LIB
+  DEP_FILE = CMakeFiles/4yshot.dir/src/platform/window_keep_above.cpp.o.d
   FLAGS = -O3 -DNDEBUG -std=gnu++20
   INCLUDES = -I/home/henvei/桌面/4YShot/build/4yshot_autogen/include -I/home/henvei/桌面/4YShot/src -isystem /usr/include/x86_64-linux-gnu/qt6/QtCore -isystem /usr/include/x86_64-linux-gnu/qt6 -isystem /usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++ -isystem /usr/include/x86_64-linux-gnu/qt6/QtGui -isystem /usr/include/x86_64-linux-gnu/qt6/QtWidgets -isystem /usr/include/x86_64-linux-gnu/qt6/QtDBus -isystem /usr/include/x86_64-linux-gnu/qt6/QtNetwork -isystem /usr/include/x86_64-linux-gnu/qt6/QtConcurrent -isystem /usr/include/KF6/KGlobalAccel
   OBJECT_DIR = CMakeFiles/4yshot.dir
@@ -207,13 +223,13 @@ build CMakeFiles/4yshot.dir/4yshot_autogen/3YJK5W5UP7/qrc_4yshot.cpp.o: CXX_COMP
 #############################################
 # Link the executable 4yshot
 
-build 4yshot: CXX_EXECUTABLE_LINKER__4yshot_Release CMakeFiles/4yshot.dir/4yshot_autogen/mocs_compilation.cpp.o CMakeFiles/4yshot.dir/src/main.cpp.o CMakeFiles/4yshot.dir/src/core/config.cpp.o CMakeFiles/4yshot.dir/src/core/app.cpp.o CMakeFiles/4yshot.dir/src/core/ocr_service.cpp.o CMakeFiles/4yshot.dir/src/platform/capture_manager.cpp.o CMakeFiles/4yshot.dir/src/annotation/shapes.cpp.o CMakeFiles/4yshot.dir/src/annotation/annotation_engine.cpp.o CMakeFiles/4yshot.dir/src/ui/selection_model.cpp.o CMakeFiles/4yshot.dir/src/ui/magnifier.cpp.o CMakeFiles/4yshot.dir/src/ui/toolbar.cpp.o CMakeFiles/4yshot.dir/src/ui/overlay_widget.cpp.o CMakeFiles/4yshot.dir/src/ui/icon_helper.cpp.o CMakeFiles/4yshot.dir/src/ui/ocr_dialog.cpp.o CMakeFiles/4yshot.dir/src/ui/long_capture_dialog.cpp.o CMakeFiles/4yshot.dir/src/ui/text_selection_bubble.cpp.o CMakeFiles/4yshot.dir/src/pin/pin_window.cpp.o CMakeFiles/4yshot.dir/4yshot_autogen/3YJK5W5UP7/qrc_4yshot.cpp.o | /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.8.2 /usr/lib/x86_64-linux-gnu/libQt6Concurrent.so.6.8.2 /usr/lib/x86_64-linux-gnu/libKF6GlobalAccel.so.6.13.0 /usr/lib/x86_64-linux-gnu/libQt6Widgets.so.6.8.2 /usr/lib/x86_64-linux-gnu/libQt6Gui.so.6.8.2 /usr/lib/x86_64-linux-gnu/libGLX.so /usr/lib/x86_64-linux-gnu/libOpenGL.so /usr/lib/x86_64-linux-gnu/libQt6DBus.so.6.8.2 /usr/lib/x86_64-linux-gnu/libQt6Core.so.6.8.2 || 4yshot_autogen 4yshot_autogen_timestamp_deps
+build 4yshot: CXX_EXECUTABLE_LINKER__4yshot_Release CMakeFiles/4yshot.dir/4yshot_autogen/mocs_compilation.cpp.o CMakeFiles/4yshot.dir/src/main.cpp.o CMakeFiles/4yshot.dir/src/core/config.cpp.o CMakeFiles/4yshot.dir/src/core/clipboard_util.cpp.o CMakeFiles/4yshot.dir/src/core/app.cpp.o CMakeFiles/4yshot.dir/src/core/ocr_service.cpp.o CMakeFiles/4yshot.dir/src/platform/capture_manager.cpp.o CMakeFiles/4yshot.dir/src/platform/window_keep_above.cpp.o CMakeFiles/4yshot.dir/src/annotation/shapes.cpp.o CMakeFiles/4yshot.dir/src/annotation/annotation_engine.cpp.o CMakeFiles/4yshot.dir/src/ui/selection_model.cpp.o CMakeFiles/4yshot.dir/src/ui/magnifier.cpp.o CMakeFiles/4yshot.dir/src/ui/toolbar.cpp.o CMakeFiles/4yshot.dir/src/ui/overlay_widget.cpp.o CMakeFiles/4yshot.dir/src/ui/icon_helper.cpp.o CMakeFiles/4yshot.dir/src/ui/ocr_dialog.cpp.o CMakeFiles/4yshot.dir/src/ui/long_capture_dialog.cpp.o CMakeFiles/4yshot.dir/src/ui/text_selection_bubble.cpp.o CMakeFiles/4yshot.dir/src/pin/pin_window.cpp.o CMakeFiles/4yshot.dir/4yshot_autogen/3YJK5W5UP7/qrc_4yshot.cpp.o | /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.8.2 /usr/lib/x86_64-linux-gnu/libQt6Concurrent.so.6.8.2 /usr/lib/x86_64-linux-gnu/libKF6GlobalAccel.so.6.13.0 /usr/lib/x86_64-linux-gnu/libQt6Widgets.so.6.8.2 /usr/lib/x86_64-linux-gnu/libQt6Gui.so.6.8.2 /usr/lib/x86_64-linux-gnu/libGLX.so /usr/lib/x86_64-linux-gnu/libOpenGL.so /usr/lib/x86_64-linux-gnu/libQt6DBus.so.6.8.2 /usr/lib/x86_64-linux-gnu/libQt6Core.so.6.8.2 || 4yshot_autogen 4yshot_autogen_timestamp_deps
   DEP_FILE = CMakeFiles/4yshot.dir/link.d
   FLAGS = -O3 -DNDEBUG
   LINK_FLAGS = -Wl,--dependency-file=CMakeFiles/4yshot.dir/link.d
   LINK_LIBRARIES = /usr/lib/x86_64-linux-gnu/libQt6Network.so.6.8.2  /usr/lib/x86_64-linux-gnu/libQt6Concurrent.so.6.8.2  /usr/lib/x86_64-linux-gnu/libKF6GlobalAccel.so.6.13.0  /usr/lib/x86_64-linux-gnu/libQt6Widgets.so.6.8.2  /usr/lib/x86_64-linux-gnu/libQt6Gui.so.6.8.2  /usr/lib/x86_64-linux-gnu/libGLX.so  /usr/lib/x86_64-linux-gnu/libOpenGL.so  /usr/lib/x86_64-linux-gnu/libQt6DBus.so.6.8.2  /usr/lib/x86_64-linux-gnu/libQt6Core.so.6.8.2
   OBJECT_DIR = CMakeFiles/4yshot.dir
-  POST_BUILD = :
+  POST_BUILD = cd /home/henvei/桌面/4YShot/build && /usr/bin/cmake -DFOURYSHOT_EXE=/home/henvei/桌面/4YShot/build/4yshot -P /home/henvei/桌面/4YShot/cmake/ensure-dev-kwin-auth.cmake
   PRE_LINK = :
   TARGET_FILE = 4yshot
   TARGET_PDB = 4yshot.dbg

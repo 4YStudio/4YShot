@@ -1,4 +1,5 @@
 #include "pin_window.h"
+#include "../core/clipboard_util.h"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -14,8 +15,6 @@
 #include <algorithm>
 #include <unordered_set>
 #include <limits>
-#include <QProcess>
-#include <QBuffer>
 #include "../ui/ocr_dialog.h"
 
 namespace fouryshot::pin {
@@ -29,8 +28,15 @@ PinWindow::PinWindow(const QPixmap& pixmap, const QPoint& initialPos, QWidget* p
 
     winId(); // Force creation of native QWindow handle for Wayland protocols
 
-    int w = std::max(60, m_pixmap.width());
-    int h = std::max(60, m_pixmap.height());
+    // The incoming pixmap may carry a devicePixelRatio (e.g. 1.75 on HiDPI
+    // screens). Qt widget geometry is in logical units, so the window must be
+    // sized with the pixmap's LOGICAL size, otherwise the image is upscaled
+    // by the DPR factor and ends up blurry/oversized.
+    const qreal dpr = m_pixmap.devicePixelRatio() > 0.0 ? m_pixmap.devicePixelRatio() : 1.0;
+    const int logicalW = qRound(m_pixmap.width() / dpr);
+    const int logicalH = qRound(m_pixmap.height() / dpr);
+    int w = std::max(60, logicalW);
+    int h = std::max(60, logicalH);
     resize(w + 8, h + 8);
     move(initialPos);
     setCursor(Qt::SizeAllCursor);
@@ -42,7 +48,7 @@ PinWindow::PinWindow(const QPixmap& pixmap, const QPoint& initialPos, QWidget* p
     // Keep OCR boxes in that same coordinate space; using the pixmap DPR here
     // would shrink the boxes while the image itself is still addressed in pixels.
     m_ocrService = std::make_unique<core::OcrService>(this);
-    m_ocrService->recognizeAsync(m_pixmap, 1.0, [this](const core::OcrResult& res) {
+    m_ocrService->recognizeAsync(m_pixmap, m_pixmap.devicePixelRatio(), [this](const core::OcrResult& res) {
         if (res.success) {
             m_ocrWords = res.words;
             m_ocrLines = res.lines;
@@ -65,8 +71,9 @@ PinWindow::~PinWindow() {
 
 void PinWindow::setZoom(qreal scale) {
     m_scale = std::clamp(scale, 0.1, 8.0);
-    int w = std::max(60, static_cast<int>(m_pixmap.width() * m_scale));
-    int h = std::max(60, static_cast<int>(m_pixmap.height() * m_scale));
+    const qreal dpr = m_pixmap.devicePixelRatio() > 0.0 ? m_pixmap.devicePixelRatio() : 1.0;
+    int w = std::max(60, static_cast<int>(qRound(m_pixmap.width() / dpr) * m_scale));
+    int h = std::max(60, static_cast<int>(qRound(m_pixmap.height() / dpr) * m_scale));
     resize(w + 8, h + 8);
     update();
 }
@@ -117,9 +124,13 @@ int PinWindow::findOcrWordAt(const QPoint& localPos) const {
     QRect contentRect = rect().adjusted(4, 4, -4, -4);
     if (!contentRect.contains(localPos)) return -1;
 
-    // Scale from contentRect back to pixmap physical / logical coordinate
-    qreal scaleX = static_cast<qreal>(contentRect.width()) / m_pixmap.width();
-    qreal scaleY = static_cast<qreal>(contentRect.height()) / m_pixmap.height();
+    // Scale from contentRect (logical window coords) back to the pixmap's
+    // logical pixel space. The DPR is already factored into the window size,
+    // so logicalWidth(width()/dpr) must be used to keep the mapping correct
+    // on HiDPI screens.
+    const qreal dpr = m_pixmap.devicePixelRatio();
+    qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
 
     QPoint ptInImage(
         static_cast<int>((localPos.x() - contentRect.left()) / scaleX),
@@ -139,8 +150,9 @@ int PinWindow::findNearestOcrWordAt(const QPoint& localPos) const {
     if (m_ocrWords.empty() || m_pixmap.width() <= 0 || m_pixmap.height() <= 0) return -1;
     QRect contentRect = rect().adjusted(4, 4, -4, -4);
 
-    qreal scaleX = static_cast<qreal>(contentRect.width()) / m_pixmap.width();
-    qreal scaleY = static_cast<qreal>(contentRect.height()) / m_pixmap.height();
+    const qreal dpr = m_pixmap.devicePixelRatio();
+    qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
 
     int clampedX = std::clamp(localPos.x(), contentRect.left(), contentRect.right());
     int clampedY = std::clamp(localPos.y(), contentRect.top(), contentRect.bottom());
@@ -283,8 +295,9 @@ QList<QRect> PinWindow::getContinuousHighlightRects() const {
     if (m_selectedOcrIndices.empty() || m_ocrWords.empty()) return rects;
 
     QRect contentRect = rect().adjusted(4, 4, -4, -4);
-    qreal scaleX = static_cast<qreal>(contentRect.width()) / m_pixmap.width();
-    qreal scaleY = static_cast<qreal>(contentRect.height()) / m_pixmap.height();
+    const qreal dpr = m_pixmap.devicePixelRatio();
+    qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
 
     std::unordered_set<int> selSet(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end());
 
@@ -438,8 +451,9 @@ void PinWindow::paintEvent(QPaintEvent* event) {
 
     // Render continuous OCR highlight overlays whenever text is selected or hovered
     if ((!m_selectedOcrIndices.empty() || m_hoveredOcrIndex != -1) && m_pixmap.width() > 0 && m_pixmap.height() > 0) {
-        qreal scaleX = static_cast<qreal>(contentRect.width()) / m_pixmap.width();
-        qreal scaleY = static_cast<qreal>(contentRect.height()) / m_pixmap.height();
+        const qreal dpr = m_pixmap.devicePixelRatio();
+        qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+        qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
 
         // A. Continuous selection highlight ribbons
         auto highlightRects = getContinuousHighlightRects();
@@ -758,24 +772,9 @@ void PinWindow::copyToClipboard() {
     QClipboard* clipboard = QGuiApplication::clipboard();
     clipboard->setPixmap(m_pixmap);
     clipboard->setImage(m_pixmap.toImage());
-
-    // Wayland session clipboard persistence via wl-copy
-    QByteArray pngData;
-    QBuffer buffer(&pngData);
-    buffer.open(QIODevice::WriteOnly);
-    m_pixmap.toImage().save(&buffer, "PNG");
-    buffer.close();
-
-    QProcess* wlProc = new QProcess();
-    wlProc->start("wl-copy", {"-t", "image/png"});
-    if (wlProc->waitForStarted(500)) {
-        wlProc->write(pngData);
-        wlProc->closeWriteChannel();
-        QObject::connect(wlProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                         wlProc, &QObject::deleteLater);
-    } else {
-        wlProc->deleteLater();
-    }
+    // The app may quit once the last pin closes; hand the image to wl-copy's
+    // daemon so the selection survives the exit (see clipboard_util.cpp).
+    core::persistClipboardImage(m_pixmap.toImage());
 }
 
 void PinWindow::saveToFile() {

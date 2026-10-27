@@ -16,11 +16,14 @@
 #include <QPushButton>
 #include <QRegion>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
+
+#include "../core/clipboard_util.h"
 
 namespace fouryshot::ui {
 
@@ -77,6 +80,18 @@ LongCapturePanel::LongCapturePanel(const QImage& firstSegment, QWidget* parent)
     connect(m_copyButton, &QPushButton::clicked, this, &LongCapturePanel::copyResult);
     connect(m_saveButton, &QPushButton::clicked, this, &LongCapturePanel::saveResult);
     connect(m_cancelButton, &QPushButton::clicked, this, &LongCapturePanel::cancelSession);
+
+    // Keep the keyboard model consistent with the normal screenshot overlay:
+    // Ctrl+C copies, Ctrl+S saves, Esc cancels.
+    auto* copyShortcut = new QShortcut(QKeySequence::Copy, this);
+    copyShortcut->setContext(Qt::WindowShortcut);
+    connect(copyShortcut, &QShortcut::activated, this, &LongCapturePanel::copyResult);
+    auto* saveShortcut = new QShortcut(QKeySequence::Save, this);
+    saveShortcut->setContext(Qt::WindowShortcut);
+    connect(saveShortcut, &QShortcut::activated, this, &LongCapturePanel::saveResult);
+    auto* cancelShortcut = new QShortcut(Qt::Key_Escape, this);
+    cancelShortcut->setContext(Qt::WindowShortcut);
+    connect(cancelShortcut, &QShortcut::activated, this, &LongCapturePanel::cancelSession);
 
     updateThumbnail();
     appendDebug("启动：首帧 1 张，等待滚动");
@@ -135,13 +150,23 @@ bool LongCapturePanel::recordFrame(
         return false;
     }
 
-    constexpr qint64 maxBufferedBytes = 256LL * 1024LL * 1024LL;
-    if (m_pendingFrames.size() < 180 && m_bufferedBytes + normalized.sizeInBytes() <= maxBufferedBytes) {
+    constexpr qint64 maxBufferedBytes = 768LL * 1024LL * 1024LL;
+    constexpr int maxPendingFrames = 240;
+    if (m_pendingFrames.size() < maxPendingFrames && m_bufferedBytes + normalized.sizeInBytes() <= maxBufferedBytes) {
         m_pendingFrames.push_back(normalized);
         m_bufferedBytes += normalized.sizeInBytes();
-    } else if (m_pendingFrames.size() == 180 || m_bufferedBytes + normalized.sizeInBytes() > maxBufferedBytes) {
-        appendDebug(QString("缓存上限已达：%1 张 / %2 MB")
-                        .arg(m_pendingFrames.size()).arg(m_bufferedBytes / (1024 * 1024)));
+    } else if (m_pendingFrames.size() == maxPendingFrames || m_bufferedBytes + normalized.sizeInBytes() > maxBufferedBytes) {
+        // 滚动中途缓存撞顶：立即增量合并释放空间，而不是丢弃新帧。
+        // 这样快速连续滚动时逐段拼入大图，帧与帧之间不会出现缺口。
+        if (m_pendingFrames.size() >= 4) {
+            appendDebug(QString("滚动中触发增量合并：%1 张 / %2 MB")
+                            .arg(m_pendingFrames.size()).arg(m_bufferedBytes / (1024 * 1024)));
+            mergePendingFrames(true);
+        }
+        if (m_pendingFrames.size() < maxPendingFrames && m_bufferedBytes + normalized.sizeInBytes() <= maxBufferedBytes) {
+            m_pendingFrames.push_back(normalized);
+            m_bufferedBytes += normalized.sizeInBytes();
+        }
     }
     m_lastSegment = normalized;
 
@@ -170,18 +195,23 @@ bool LongCapturePanel::hasPendingFrames() const {
     return !m_pendingFrames.isEmpty();
 }
 
-void LongCapturePanel::mergePendingFrames() {
+void LongCapturePanel::mergePendingFrames(bool keepScrolling) {
     if (m_pendingFrames.isEmpty()) {
-        updateStatus(QString("等待滚动 · 已采集 %1 帧 · 没有待合并帧").arg(m_totalCapturedFrames));
+        if (!keepScrolling) {
+            updateStatus(QString("等待滚动 · 已采集 %1 帧 · 没有待合并帧").arg(m_totalCapturedFrames));
+        }
         return;
     }
 
     QElapsedTimer mergeTimer;
     mergeTimer.start();
-    setScrolling(false);
-    updateStatus(QString("合并中 · 0/%1 张").arg(m_pendingFrames.size()));
-    appendDebug(QString("开始合并：%1 张缓存帧 · 当前结果 %2x%3")
-                    .arg(m_pendingFrames.size()).arg(m_composite.width()).arg(m_composite.height()));
+    if (!keepScrolling) {
+        setScrolling(false);
+        updateStatus(QString("合并中 · 0/%1 张").arg(m_pendingFrames.size()));
+    }
+    appendDebug(QString("开始合并：%1 张缓存帧 · 当前结果 %2x%3 %4")
+                    .arg(m_pendingFrames.size()).arg(m_composite.width()).arg(m_composite.height())
+                    .arg(keepScrolling ? QStringLiteral("（滚动中增量合并）") : QString()));
     if (m_positionedFrames.isEmpty()) m_positionedFrames.push_back({m_lastMergedSegment, 0});
 
     int appendedFrames = 0;
@@ -270,9 +300,14 @@ void LongCapturePanel::mergePendingFrames() {
     m_bufferedBytes = 0;
     updateThumbnail();
     appendDebug(QString("合并耗时 %1 ms").arg(mergeTimer.elapsed()));
-    updateStatus(QString("等待滚动 · 已采集 %1 帧 · 合成 %2 段 · 高度 %3 px · 合并 %4 ms")
-                     .arg(m_totalCapturedFrames).arg(m_mergedSegmentCount)
-                     .arg(m_composite.height()).arg(mergeTimer.elapsed()));
+    if (keepScrolling) {
+        updateStatus(QString("滚动采集中 · 已合成 %1 段 · 高度 %2 px · 增量合并 %3 ms")
+                         .arg(m_mergedSegmentCount).arg(m_composite.height()).arg(mergeTimer.elapsed()));
+    } else {
+        updateStatus(QString("等待滚动 · 已采集 %1 帧 · 合成 %2 段 · 高度 %3 px · 合并 %4 ms")
+                         .arg(m_totalCapturedFrames).arg(m_mergedSegmentCount)
+                         .arg(m_composite.height()).arg(mergeTimer.elapsed()));
+    }
 }
 
 QImage LongCapturePanel::compositeImage() const {
@@ -302,6 +337,17 @@ void LongCapturePanel::setScrolling(bool scrolling) {
 void LongCapturePanel::copyResult() {
     emit sessionFinishing();
     QGuiApplication::clipboard()->setImage(m_composite);
+    // Hand the image to wl-copy's daemon so the selection survives this
+    // process quitting right after the panel closes — same problem and fix as
+    // the normal screenshot path (OverlayWidget::onCopy). Long screenshots can
+    // be very tall, so allow a generous budget for PNG encoding + pipe
+    // transfer; otherwise wl-copy installs an EMPTY selection and pasting
+    // yields nothing.
+    if (!m_composite.isNull()) {
+        updateStatus("正在写入剪贴板…");
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        core::persistClipboardImage(m_composite, 30000);
+    }
     m_sessionEnded = true;
     emit sessionFinished();
     hide();
@@ -339,8 +385,8 @@ void LongCapturePanel::updateThumbnail() {
 
 QImage LongCapturePanel::makeMatchImage(const QImage& image) {
     if (image.isNull()) return {};
-    constexpr int maxWidth = 144;
-    constexpr int maxHeight = 160;
+    constexpr int maxWidth = 240;
+    constexpr int maxHeight = 240;
     const qreal scale = std::min({1.0,
                                   static_cast<qreal>(maxWidth) / image.width(),
                                   static_cast<qreal>(maxHeight) / image.height()});
@@ -362,10 +408,10 @@ LongCapturePanel::ScrollMatch LongCapturePanel::findScrollMatch(
     if (a.isNull() || b.isNull() || a.size() != b.size() || a.height() < 20) return result;
     const int height = a.height();
     const int width = a.width();
-    const int minOverlap = std::max(12, height / 10);
+    const int minOverlap = std::max(16, height / 8);
     const int maxOffset = height - minOverlap;
     const int minOffset = 1;
-    const int xStep = std::max(1, width / 96);
+    const int xStep = std::max(1, width / 128);
     const int blockCount = std::min(8, width);
 
     qint64 stationaryDiff = 0;
@@ -408,11 +454,11 @@ LongCapturePanel::ScrollMatch LongCapturePanel::findScrollMatch(
         for (int block = 0; block < blockCount; ++block) {
             if (blockSamples[block] == 0) continue;
             const double score = static_cast<double>(blockDiff[block]) / blockSamples[block];
-            if (score <= 26.0) ++matchedBlocks;
+            if (score <= 34.0) ++matchedBlocks;
             diff += blockDiff[block];
             samples += blockSamples[block];
         }
-        if (samples == 0 || matchedBlocks < std::max(2, (blockCount * 2 + 2) / 3)) return;
+        if (samples == 0 || matchedBlocks < std::max(3, (blockCount * 2 + 1) / 2)) return;
         const double score = static_cast<double>(diff) / samples;
         if (score < bestScore) {
             bestScore = score;
@@ -422,11 +468,11 @@ LongCapturePanel::ScrollMatch LongCapturePanel::findScrollMatch(
 
     // Coarse-to-fine search keeps continuous capture light enough to run at a
     // high cadence while retaining pixel-level alignment in the final pass.
-    for (int offset = minOffset; offset <= maxOffset; offset += 2) evaluateOffset(offset);
+    for (int offset = minOffset; offset <= maxOffset; offset += 1) evaluateOffset(offset);
     if (bestOffset >= 0) {
         const int coarseOffset = bestOffset;
-        for (int offset = std::max(minOffset, coarseOffset - 2);
-             offset <= std::min(maxOffset, coarseOffset + 2); ++offset) {
+        for (int offset = std::max(minOffset, coarseOffset - 1);
+             offset <= std::min(maxOffset, coarseOffset + 1); ++offset) {
             evaluateOffset(offset);
         }
     }
@@ -435,7 +481,7 @@ LongCapturePanel::ScrollMatch LongCapturePanel::findScrollMatch(
         result.score = bestScore;
         const qreal scaleY = static_cast<qreal>(previous.height()) / height;
         const int coarseOriginalOffset = qRound(bestOffset * scaleY);
-        const int refineRadius = std::max(1, qCeil(scaleY));
+        const int refineRadius = std::max(3, qCeil(scaleY * 1.5));
         const int originalMinOverlap = std::max(24, previous.height() / 10);
         const int originalMaxOffset = previous.height() - originalMinOverlap;
         const int originalXStep = std::max(1, previous.width() / 128);
@@ -466,10 +512,10 @@ LongCapturePanel::ScrollMatch LongCapturePanel::findScrollMatch(
         }
         if (refinedScore < std::numeric_limits<double>::max()) result.score = refinedScore;
         result.candidateOffset = refinedOffset;
-        const bool motionEvidence = result.stationaryScore >= 6.0 &&
-                                   result.stationaryScore >= result.score + 3.0 &&
-                                   result.stationaryScore >= result.score * 1.15 + 2.0;
-        result.accepted = result.score <= 26.0 && motionEvidence;
+        const bool motionEvidence = result.stationaryScore >= 4.0 &&
+                                   result.stationaryScore >= result.score + 2.0 &&
+                                   result.stationaryScore >= result.score * 1.10 + 1.5;
+        result.accepted = result.score <= 34.0 && motionEvidence;
         if (result.accepted) result.offset = result.candidateOffset;
     } else {
         result.score = -1.0;

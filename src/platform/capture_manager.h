@@ -47,6 +47,12 @@ private:
     bool captureViaSpectacle(QPixmap& outPixmap, std::shared_ptr<QImage>& outImage);
     static bool captureViaSpectacleImage(QImage& outImage);
     static bool captureViaKWinArea(const QRect& logicalRegion, QImage& outImage, QString* error);
+    static bool captureViaKWinScreens(
+        QPixmap& outPixmap,
+        std::shared_ptr<QImage>& outImage,
+        const QRect& combinedGeometry,
+        QList<ScreenTarget>& outScreens
+    );
 };
 
 } // namespace fouryshot::platform

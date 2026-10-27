@@ -10,6 +10,8 @@
 	/home/henvei/桌面/4YShot/src/annotation/shapes.h \
 	/home/henvei/桌面/4YShot/src/core/app.cpp \
 	/home/henvei/桌面/4YShot/src/core/app.h \
+	/home/henvei/桌面/4YShot/src/core/clipboard_util.cpp \
+	/home/henvei/桌面/4YShot/src/core/clipboard_util.h \
 	/home/henvei/桌面/4YShot/src/core/config.cpp \
 	/home/henvei/桌面/4YShot/src/core/config.h \
 	/home/henvei/桌面/4YShot/src/core/ocr_service.cpp \
@@ -19,6 +21,8 @@
 	/home/henvei/桌面/4YShot/src/pin/pin_window.h \
 	/home/henvei/桌面/4YShot/src/platform/capture_manager.cpp \
 	/home/henvei/桌面/4YShot/src/platform/capture_manager.h \
+	/home/henvei/桌面/4YShot/src/platform/window_keep_above.cpp \
+	/home/henvei/桌面/4YShot/src/platform/window_keep_above.h \
 	/home/henvei/桌面/4YShot/src/ui/icon_helper.cpp \
 	/home/henvei/桌面/4YShot/src/ui/icon_helper.h \
 	/home/henvei/桌面/4YShot/src/ui/long_capture_dialog.cpp \
