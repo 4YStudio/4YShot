@@ -283,6 +283,12 @@ CPACK_SOURCE_ZIP:BOOL=OFF
 KF6GlobalAccel_DIR:PATH=/lib/x86_64-linux-gnu/cmake/KF6GlobalAccel
 
 //Path to a file.
+ONNXRUNTIME_INCLUDE_DIR:PATH=/usr/include/onnxruntime
+
+//Path to a library.
+ONNXRUNTIME_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libonnxruntime.so
+
+//Path to a file.
 OPENGL_EGL_INCLUDE_DIR:PATH=/usr/include
 
 //Path to a file.
@@ -368,7 +374,7 @@ Qt6Widgets_DIR:PATH=/lib/x86_64-linux-gnu/cmake/Qt6Widgets
 Qt6_DIR:PATH=/lib/x86_64-linux-gnu/cmake/Qt6
 
 //Path to a program.
-Vulkan_GLSLANG_VALIDATOR_EXECUTABLE:FILEPATH=Vulkan_GLSLANG_VALIDATOR_EXECUTABLE-NOTFOUND
+Vulkan_GLSLANG_VALIDATOR_EXECUTABLE:FILEPATH=/bin/glslangValidator
 
 //Path to a program.
 Vulkan_GLSLC_EXECUTABLE:FILEPATH=Vulkan_GLSLC_EXECUTABLE-NOTFOUND

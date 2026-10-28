@@ -14,6 +14,8 @@
 	/home/henvei/桌面/4YShot/src/core/clipboard_util.h \
 	/home/henvei/桌面/4YShot/src/core/config.cpp \
 	/home/henvei/桌面/4YShot/src/core/config.h \
+	/home/henvei/桌面/4YShot/src/core/ocr_engine.cpp \
+	/home/henvei/桌面/4YShot/src/core/ocr_engine.h \
 	/home/henvei/桌面/4YShot/src/core/ocr_service.cpp \
 	/home/henvei/桌面/4YShot/src/core/ocr_service.h \
 	/home/henvei/桌面/4YShot/src/main.cpp \

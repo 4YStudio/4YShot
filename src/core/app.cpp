@@ -5,6 +5,7 @@
 #include <QAction>
 #include <QClipboard>
 #include <QDebug>
+#include <QPainter>
 #include <QFile>
 #include <QCursor>
 #include <QElapsedTimer>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include "config.h"
+#include "ocr_engine.h"
 #include "../pin/pin_window.h"
 #include "../platform/window_keep_above.h"
 
@@ -91,11 +93,20 @@ int App::run() {
     QCommandLineOption probeCaptureOpt(QStringList() << "probe-capture");
     probeCaptureOpt.setDescription("诊断：验证 KWin 区域截图授权与链路后退出。");
     probeCaptureOpt.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption ocrSelfTestOpt(QStringList() << "ocr-selftest");
+    ocrSelfTestOpt.setDescription("诊断：渲染样例文本并测试 PP-OCR 识别链路后退出。");
+    ocrSelfTestOpt.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption ocrImageOpt(QStringList() << "ocr-image");
+    ocrImageOpt.setDescription("诊断：对指定图片文件运行 OCR 并输出结果后退出。");
+    ocrImageOpt.setValueName("image");
+    ocrImageOpt.setFlags(QCommandLineOption::HiddenFromHelp);
 
     parser.addOption(daemonOpt);
     parser.addOption(captureOpt);
     parser.addOption(pinOpt);
     parser.addOption(probeCaptureOpt);
+    parser.addOption(ocrSelfTestOpt);
+    parser.addOption(ocrImageOpt);
 
     parser.process(*m_qapp);
 
@@ -126,6 +137,55 @@ int App::run() {
                             << " " << fullDesktop.width() << "x" << fullDesktop.height()
                             << Qt::endl;
         return fullOk ? 0 : 1;
+    }
+
+    if (parser.isSet(ocrSelfTestOpt) || parser.isSet(ocrImageOpt)) {
+        QImage testImage;
+        if (parser.isSet(ocrImageOpt)) {
+            testImage = QImage(parser.value(ocrImageOpt));
+            if (testImage.isNull()) {
+                QTextStream(stdout) << "FAIL 无法读取图片: " << parser.value(ocrImageOpt) << Qt::endl;
+                return 1;
+            }
+        } else {
+            // Render a screenshot-like sample: mixed CJK/EN text, small font,
+            // colored background, dark theme line.
+            testImage = QImage(760, 320, QImage::Format_RGB888);
+            testImage.fill(QColor(247, 248, 250));
+            QPainter p(&testImage);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.fillRect(0, 0, 760, 40, QColor(30, 34, 44));
+            p.setPen(QColor(220, 224, 232));
+            p.setFont(QFont("Noto Sans CJK SC", 12));
+            p.drawText(20, 27, "系统设置 — Network Settings");
+            p.setPen(QColor(51, 51, 51));
+            p.setFont(QFont("Noto Sans CJK SC", 10));
+            p.drawText(20, 70, "网络代理：手动配置 HTTP 代理 192.168.1.1:8080");
+            p.drawText(20, 100, "带宽限制：上行 30 Mbps，下行 500 Mbps");
+            p.setPen(QColor(22, 119, 255));
+            p.drawText(20, 130, "Download speed: 87.4 MB/s, latency 3.2 ms");
+            p.setPen(QColor(82, 196, 26));
+            p.drawText(20, 160, "IPv4 地址：192.168.31.24 网关 192.168.31.1");
+            p.setPen(QColor(120, 120, 128));
+            p.setFont(QFont("Noto Sans CJK SC", 8));
+            p.drawText(20, 190, "小字号测试：宋体五号 SimSun regular text 0123456789");
+            p.end();
+        }
+
+        OcrEngine* engine = OcrEngine::instance();
+        if (!engine || !engine->isValid()) {
+            QTextStream(stdout) << "FAIL OCR 引擎不可用（缺少 onnxruntime 或模型文件）" << Qt::endl;
+            return 1;
+        }
+        QElapsedTimer t;
+        t.start();
+        const auto lines = engine->recognize(testImage);
+        const qint64 ms = t.elapsed();
+        QTextStream(stdout) << "OCR-RESULT lines=" << lines.size() << " time=" << ms << "ms" << Qt::endl;
+        for (const auto& l : lines) {
+            QTextStream(stdout) << QStringLiteral("  [%1%] %2").arg(qRound(l.confidence * 100)).arg(l.text) << Qt::endl;
+        }
+        return 0;
     }
 
     bool isDaemon = parser.isSet(daemonOpt);

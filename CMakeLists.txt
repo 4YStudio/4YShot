@@ -70,6 +70,34 @@ if(KF6GlobalAccel_FOUND)
     target_compile_definitions(4yshot PRIVATE HAS_KF6_GLOBALACCEL)
 endif()
 
+# PP-OCR engine (ONNX Runtime): much better quality than Tesseract for
+# screenshot text. Optional: falls back to Tesseract when absent.
+find_library(ONNXRUNTIME_LIBRARY onnxruntime)
+find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h PATH_SUFFIXES onnxruntime)
+if(ONNXRUNTIME_LIBRARY AND ONNXRUNTIME_INCLUDE_DIR)
+    message(STATUS "Enabling PP-OCR (ONNX Runtime) engine: ${ONNXRUNTIME_LIBRARY}")
+    target_sources(4yshot PRIVATE src/core/ocr_engine.cpp)
+    target_link_libraries(4yshot PRIVATE ${ONNXRUNTIME_LIBRARY})
+    target_include_directories(4yshot PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+    target_compile_definitions(4yshot PRIVATE HAS_ONNXRUNTIME)
+else()
+    message(STATUS "ONNX Runtime not found; OCR uses the Tesseract fallback")
+endif()
+
+# Bundle PP-OCR models next to the build artifact / into the install tree.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/models/ch_PP-OCRv4_det_infer.onnx)
+    add_custom_command(TARGET 4yshot POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_CURRENT_SOURCE_DIR}/models
+                $<TARGET_FILE_DIR:4yshot>/models
+        COMMENT "Copying PP-OCR models next to the build artifact"
+        VERBATIM
+    )
+    install(DIRECTORY models/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/4yshot/models
+    )
+endif()
+
 include(GNUInstallDirs)
 
 install(TARGETS 4yshot RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -98,6 +126,6 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "4YShot maintainers")
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "tesseract-ocr, tesseract-ocr-chi-sim, tesseract-ocr-eng")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "tesseract-ocr, tesseract-ocr-chi-sim, tesseract-ocr-eng, libonnxruntime1.21")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 include(CPack)

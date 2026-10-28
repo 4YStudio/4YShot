@@ -359,6 +359,12 @@
 			null
 		],
 		[
+			"/home/henvei/\u684c\u9762/4YShot/src/core/ocr_engine.h",
+			"MU",
+			"PRMOGMWJPH/moc_ocr_engine.cpp",
+			null
+		],
+		[
 			"/home/henvei/\u684c\u9762/4YShot/src/core/ocr_service.h",
 			"MU",
 			"PRMOGMWJPH/moc_ocr_service.cpp",
@@ -437,6 +443,7 @@
 	"MOC_DEFINITIONS" : 
 	[
 		"HAS_KF6_GLOBALACCEL",
+		"HAS_ONNXRUNTIME",
 		"QT_CONCURRENT_LIB",
 		"QT_CORE_LIB",
 		"QT_DBUS_LIB",
@@ -455,6 +462,7 @@
 	"MOC_INCLUDES" : 
 	[
 		"/home/henvei/\u684c\u9762/4YShot/src",
+		"/usr/include/onnxruntime",
 		"/usr/include/x86_64-linux-gnu/qt6/QtCore",
 		"/usr/include/x86_64-linux-gnu/qt6",
 		"/usr/lib/x86_64-linux-gnu/qt6/mkspecs/linux-g++",
@@ -522,6 +530,11 @@
 			null
 		],
 		[ "/home/henvei/\u684c\u9762/4YShot/src/core/config.cpp", "MU", null ],
+		[
+			"/home/henvei/\u684c\u9762/4YShot/src/core/ocr_engine.cpp",
+			"MU",
+			null
+		],
 		[
 			"/home/henvei/\u684c\u9762/4YShot/src/core/ocr_service.cpp",
 			"MU",
