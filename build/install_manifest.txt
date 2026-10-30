@@ -1,6 +1,0 @@
-/4yshot/models/ch_ppocr_mobile_v2.0_cls_infer.onnx
-/4yshot/models/ch_PP-OCRv4_det_infer.onnx
-/4yshot/models/ch_PP-OCRv4_rec_infer.onnx
-/4yshot/models/ppocr_keys_v1.txt
-/usr/bin/4yshot
-/usr/share/applications/4yshot.desktop
