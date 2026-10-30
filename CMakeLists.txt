@@ -21,7 +21,11 @@ set(SOURCES
     src/core/ocr_service.h
     src/core/ocr_service.cpp
     src/core/ocr_text_model.h
+    src/core/smart_select.h
+    src/core/smart_seed.h
     src/core/ocr_text_model.cpp
+    src/core/smart_select.cpp
+    src/core/smart_seed.cpp
     src/platform/capture_manager.h
     src/platform/capture_manager.cpp
     src/platform/window_keep_above.h

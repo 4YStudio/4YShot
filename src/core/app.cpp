@@ -18,6 +18,8 @@
 #include <cmath>
 #include "config.h"
 #include "ocr_engine.h"
+#include "smart_select.h"
+#include "smart_seed.h"
 #include "../pin/pin_window.h"
 #include "../platform/window_keep_above.h"
 
@@ -100,6 +102,9 @@ int App::run() {
     ocrImageOpt.setDescription("诊断：对指定图片文件运行 OCR 并输出结果后退出。");
     ocrImageOpt.setValueName("image");
     ocrImageOpt.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption smartSelfTestOpt(QStringList() << "smart-selftest");
+    smartSelfTestOpt.setDescription("诊断：测试智能选区候选检测算法后退出。");
+    smartSelfTestOpt.setFlags(QCommandLineOption::HiddenFromHelp);
 
     parser.addOption(daemonOpt);
     parser.addOption(captureOpt);
@@ -107,6 +112,7 @@ int App::run() {
     parser.addOption(probeCaptureOpt);
     parser.addOption(ocrSelfTestOpt);
     parser.addOption(ocrImageOpt);
+    parser.addOption(smartSelfTestOpt);
 
     parser.process(*m_qapp);
 
@@ -137,6 +143,48 @@ int App::run() {
                             << " " << fullDesktop.width() << "x" << fullDesktop.height()
                             << Qt::endl;
         return fullOk ? 0 : 1;
+    }
+
+    if (parser.isSet(smartSelfTestOpt)) {
+        using namespace fouryshot::core;
+        // babry 验收用例：640x400 深色背景 + 白色面板 (120,80)-(520,330)，
+        // seed 偏 14px (134,66,400,250)，断言吸附后各边误差 <=3px。
+        QImage img(640, 400, QImage::Format_RGB32);
+        img.fill(QColor(60, 60, 60));
+        QPainter p(&img);
+        p.fillRect(120, 80, 400, 250, QColor(235, 235, 235));
+        p.end();
+        const auto candidates = smartDetect(img, { QRect(134, 66, 400, 250) });
+        bool snapOk = false;
+        QRect snapped;
+        for (const auto& c : candidates) {
+            if (c.seed
+                && std::abs(c.rect.x() - 120) <= 3 && std::abs(c.rect.y() - 80) <= 3
+                && std::abs(c.rect.x() + c.rect.width() - 520) <= 3
+                && std::abs(c.rect.y() + c.rect.height() - 330) <= 3) {
+                snapOk = true;
+                snapped = c.rect;
+                break;
+            }
+        }
+        // 无 seed 时 CV 直接检出面板（容差放宽到 6px）
+        const auto pure = smartDetect(img, {});
+        bool cvOk = false;
+        for (const auto& c : pure) {
+            if (std::abs(c.rect.x() - 120) <= 6 && std::abs(c.rect.y() - 80) <= 6
+                && std::abs(c.rect.x() + c.rect.width() - 520) <= 6
+                && std::abs(c.rect.y() + c.rect.height() - 330) <= 6) {
+                cvOk = true;
+                break;
+            }
+        }
+        QTextStream(stdout) << "SMART-RESULT snap=" << (snapOk ? "OK" : "FAIL")
+                            << " snapped=" << QString("%1,%2 %3x%4")
+                            .arg(snapped.x()).arg(snapped.y()).arg(snapped.width()).arg(snapped.height())
+                            << " cvDetect=" << (cvOk ? "OK" : "FAIL")
+                            << " candidates=" << candidates.size() << "/" << pure.size()
+                            << Qt::endl;
+        return (snapOk && cvOk) ? 0 : 1;
     }
 
     if (parser.isSet(ocrSelfTestOpt) || parser.isSet(ocrImageOpt)) {
@@ -321,6 +369,12 @@ void App::startCapture() {
     if (m_isCapturing || m_longCaptureRunning || m_longCapturePanel) return;
     m_isCapturing = true;
 
+    // 合成器窗口 seed（智能选区窗口级候选），在截屏前查询窗口布局
+    core::SmartSeedCollector seedCollector;
+    const std::vector<QRect> smartSeeds = seedCollector.collect();
+    if (!smartSeeds.empty())
+        qDebug() << "[SmartSeed] collected" << smartSeeds.size() << "window regions";
+
     QPixmap fullDesktop;
     std::shared_ptr<QImage> fullDesktopImage;
     QRect combinedGeometry;
@@ -344,7 +398,7 @@ void App::startCapture() {
     for (const auto& target : screens) {
         auto* overlay = new ui::OverlayWidget(
             target, combinedGeometry, fullDesktop, fullDesktopImage,
-            m_selectionModel, m_annotationEngine
+            m_selectionModel, m_annotationEngine, smartSeeds
         );
         connect(overlay, &ui::OverlayWidget::captureCompleted, this, &App::onCaptureFinished);
         connect(overlay, &ui::OverlayWidget::captureCancelled, this, &App::onCaptureFinished);

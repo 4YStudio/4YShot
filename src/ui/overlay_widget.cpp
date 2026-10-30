@@ -34,10 +34,12 @@ OverlayWidget::OverlayWidget(
     std::shared_ptr<QImage> fullDesktopImage,
     std::shared_ptr<SelectionModel> selectionModel,
     std::shared_ptr<annotation::AnnotationEngine> annotationEngine,
+    std::vector<QRect> smartSeeds,
     QWidget* parent
 ) : QWidget(parent, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool),
     m_target(target),
     m_desktopGeometry(desktopGeometry),
+    m_smartSeeds(std::move(smartSeeds)),
     m_fullDesktopPixmap(fullDesktopPixmap),
     m_fullDesktopImage(fullDesktopImage),
     m_selectionModel(selectionModel),
@@ -72,6 +74,9 @@ OverlayWidget::OverlayWidget(
     // Toolbar
     m_toolbar = new Toolbar(this);
     m_toolbar->hide();
+
+    // 智能选区：后台分析候选（babry 移植）
+    startSmartDetect();
 
     // In-place Text Editor
     m_textEditor = new QLineEdit(this);
@@ -120,6 +125,69 @@ OverlayWidget::OverlayWidget(
     connect(m_toolbar, &Toolbar::copyTriggered, this, &OverlayWidget::onCopy);
     connect(m_toolbar, &Toolbar::closeTriggered, this, &OverlayWidget::onClose);
     connect(m_toolbar, &Toolbar::sizeChanged, this, &OverlayWidget::updateToolbarPosition);
+}
+
+void OverlayWidget::startSmartDetect() {
+    if (!m_fullDesktopImage || m_fullDesktopImage->isNull())
+        return;
+    QRect srcRect(
+        std::round((m_target.logicalGeometry.x() - m_desktopGeometry.x()) * m_target.dpr),
+        std::round((m_target.logicalGeometry.y() - m_desktopGeometry.y()) * m_target.dpr),
+        std::round(m_target.logicalGeometry.width() * m_target.dpr),
+        std::round(m_target.logicalGeometry.height() * m_target.dpr)
+    );
+    QImage crop = m_fullDesktopImage->copy(srcRect);
+    // 把全局逻辑坐标的窗口 seed 换算成本屏物理坐标
+    std::vector<QRect> seedsPhys;
+    seedsPhys.reserve(m_smartSeeds.size());
+    const qreal dpr = m_target.dpr;
+    for (const QRect& s : m_smartSeeds) {
+        const QRect local = s.translated(-m_target.logicalGeometry.topLeft());
+        QRect phys(std::round(local.x() * dpr), std::round(local.y() * dpr),
+                   std::round(local.width() * dpr), std::round(local.height() * dpr));
+        phys = phys.intersected(QRect(0, 0, crop.width(), crop.height()));
+        if (phys.width() > 8 && phys.height() > 8)
+            seedsPhys.push_back(phys);
+    }
+    if (ocrOverlayDbg())
+        qWarning() << "[SmartSeed] global" << m_smartSeeds.size()
+                   << "-> phys" << seedsPhys.size() << "for" << m_target.logicalGeometry;
+    m_smartPending = std::make_unique<std::future<std::vector<core::SmartCandidate>>>(
+        std::async(std::launch::async, [img = std::move(crop), seeds = std::move(seedsPhys)]() {
+            return core::smartDetect(img, std::move(seeds));
+        }));
+}
+
+bool OverlayWidget::pollSmartCandidates() {
+    if (!m_smartReady && m_smartPending
+        && m_smartPending->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        m_smartCandidates = m_smartPending->get();
+        m_smartPending.reset();
+        m_smartReady = true;
+        if (ocrOverlayDbg()) {
+            for (const auto& c : m_smartCandidates)
+                qWarning() << "[SmartCand]" << (c.seed ? "SEED" : "cv") << "q" << c.quality << c.rect;
+        }
+    }
+    return m_smartReady;
+}
+
+QPointF OverlayWidget::toScreenPhysical(const QPoint& globalPos) const {
+    return QPointF((globalPos.x() - m_target.logicalGeometry.x()) * m_target.dpr,
+                   (globalPos.y() - m_target.logicalGeometry.y()) * m_target.dpr);
+}
+
+QRect OverlayWidget::toGlobalLogical(const QRect& physical) const {
+    return QRect(qRound(physical.x() / m_target.dpr) + m_target.logicalGeometry.x(),
+                 qRound(physical.y() / m_target.dpr) + m_target.logicalGeometry.y(),
+                 qRound(physical.width() / m_target.dpr),
+                 qRound(physical.height() / m_target.dpr));
+}
+
+QRect OverlayWidget::screenBoundsPhysical() const {
+    return QRect(0, 0,
+                 int(std::round(m_target.logicalGeometry.width() * m_target.dpr)),
+                 int(std::round(m_target.logicalGeometry.height() * m_target.dpr)));
 }
 
 void OverlayWidget::showOverlay() {
@@ -317,6 +385,15 @@ void OverlayWidget::paintEvent(QPaintEvent* event) {
     painter.fillRect(rect(), QColor(0, 0, 0, 110));
     painter.setClipping(false);
 
+    // 2.5 智能选区候选高亮（无选区时）
+    if (!m_selectionModel->hasSelection() && m_smartHoverRect.isValid()) {
+        const QRect smartLocal = toGlobalLogical(m_smartHoverRect)
+                                     .translated(-m_target.logicalGeometry.topLeft());
+        painter.setPen(QPen(QColor("#1677ff"), 2));
+        painter.setBrush(QColor(22, 119, 255, 28));
+        painter.drawRect(smartLocal);
+    }
+
     // 3. Render OCR highlights and annotations clipped to selection box
     if (m_selectionModel->hasSelection()) {
         painter.save();
@@ -494,6 +571,7 @@ void OverlayWidget::mousePressEvent(QMouseEvent* event) {
             }
 
             // Start new selection
+            m_smartPressPos = globalPos;
             m_selectionModel->clear();
             m_selectionModel->setState(SelectionState::Selecting);
             m_dragStartPos = globalPos;
@@ -618,6 +696,19 @@ void OverlayWidget::mouseMoveEvent(QMouseEvent* event) {
         m_magnifier->show();
     } else {
         m_magnifier->hide();
+    }
+
+    // 1.5 智能选区：空闲且无选区时，悬停吸附候选
+    if (state == SelectionState::Idle && !m_selectionModel->hasSelection()
+        && m_annotationEngine->currentTool() == annotation::ToolType::None) {
+        if (pollSmartCandidates()) {
+            const QRect next = m_smartCursor.hover(m_smartCandidates, toScreenPhysical(globalPos),
+                                                   m_smartHoverRect, screenBoundsPhysical());
+            if (next != m_smartHoverRect) {
+                m_smartHoverRect = next;
+                update();
+            }
+        }
     }
 
     // 2. Active selection box operations (ALWAYS executed, regardless of active tool)
@@ -771,6 +862,25 @@ void OverlayWidget::wheelEvent(QWheelEvent* event) {
     if (delta == 0) {
         delta = event->pixelDelta().y() * 8;
     }
+
+    // 智能选区：已有候选时，滚轮切换层级（向上=扩大到父区域，向下=进入子区域）
+    if (m_smartHoverRect.isValid()) {
+        pollSmartCandidates();
+        if (m_smartReady) {
+            const int dir = delta > 0 ? 1 : (delta < 0 ? -1 : 0);
+            if (dir != 0) {
+                const QRect next = m_smartCursor.step(m_smartCandidates, toScreenPhysical(event->globalPosition().toPoint()),
+                                                      m_smartHoverRect, screenBoundsPhysical(), dir);
+                if (next != m_smartHoverRect) {
+                    m_smartHoverRect = next;
+                    update();
+                }
+                event->accept();
+                return;
+            }
+        }
+    }
+
     m_magnifierWheelRemainder += static_cast<qreal>(delta) / 120.0;
     int steps = static_cast<int>(m_magnifierWheelRemainder);
     if (steps != 0) {
@@ -820,6 +930,13 @@ void OverlayWidget::mouseReleaseEvent(QMouseEvent* event) {
 
         auto state = m_selectionModel->state();
         if (state == SelectionState::Selecting) {
+            // 单击（未拖动）且悬停候选有效 → 确认智能选区
+            const QPoint globalNow = event->globalPosition().toPoint();
+            if ((globalNow - m_smartPressPos).manhattanLength() <= 4
+                && m_smartReady && m_smartHoverRect.isValid()) {
+                m_selectionModel->setRect(toGlobalLogical(m_smartHoverRect));
+                m_smartHoverRect = QRect();
+            }
             if (m_selectionModel->hasSelection()) {
                 m_selectionModel->setState(SelectionState::Selected);
             } else {
