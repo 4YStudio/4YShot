@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include "../core/ocr_service.h"
+#include "../core/ocr_text_model.h"
 #include "../ui/text_selection_bubble.h"
 
 namespace fouryshot::pin {
@@ -61,12 +62,8 @@ private:
 
     // OCR Support
     std::unique_ptr<core::OcrService> m_ocrService;
-    std::vector<core::OcrWordItem> m_ocrWords;
-    std::vector<core::OcrLineItem> m_ocrLines;
-    QString m_fullOcrText;
+    core::OcrTextModel m_ocrModel;
     bool m_ocrReady = false;
-    std::vector<int> m_selectedOcrIndices;
-    int m_hoveredOcrIndex = -1;
     bool m_isSelectingText = false;
     int m_textSelectAnchorIndex = -1;
     QPoint m_textSelectStart;

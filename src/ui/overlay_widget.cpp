@@ -14,7 +14,14 @@
 #include <unordered_set>
 #include <limits>
 #include "ocr_dialog.h"
+#include <QtGlobal>
 #include "../pin/pin_window.h"
+
+static bool ocrOverlayDbg()
+{
+    static const bool on = qEnvironmentVariableIsSet("FOURYSHOT_OCR_DEBUG");
+    return on;
+}
 #include "../core/app.h"
 #include "../core/clipboard_util.h"
 
@@ -116,6 +123,9 @@ OverlayWidget::OverlayWidget(
 }
 
 void OverlayWidget::showOverlay() {
+    if (ocrOverlayDbg())
+        qWarning() << "[OvShow] target" << m_target.logicalGeometry << "dpr" << m_target.dpr
+                   << "desktop" << m_desktopGeometry << "pixmapSz" << m_fullDesktopPixmap.size();
     showFullScreen();
     raise();
     activateWindow();
@@ -170,302 +180,84 @@ void OverlayWidget::triggerOcrScan() {
     );
     QPixmap crop = m_fullDesktopPixmap.copy(physRect);
     if (crop.isNull()) return;
+    if (ocrOverlayDbg())
+        qWarning() << "[OvScan] dpr" << m_target.dpr << "pixDpr" << m_fullDesktopPixmap.devicePixelRatio()
+                   << "globalSel" << globalSel << "physRect" << physRect << "crop" << crop.size()
+                   << "desktopGeom" << m_desktopGeometry << "targetGeom" << m_target.logicalGeometry;
+    crop.save("/tmp/ov_crop.png");
 
-    m_ocrWords.clear();
-    m_ocrLines.clear();
-    m_selectedOcrIndices.clear();
-    m_hoveredOcrIndex = -1;
+    m_ocrModel.clearResult();
     if (m_textBubble) {
         m_textBubble->hideBubble();
     }
 
     m_ocrService->recognizeAsync(crop, m_target.dpr, [this](const core::OcrResult& res) {
         if (res.success) {
-            m_ocrWords = res.words;
-            m_ocrLines = res.lines;
+            m_ocrModel.setResult(res);
+            if (ocrOverlayDbg()) {
+                qWarning() << "[OvRes]" << m_target.logicalGeometry << "words" << m_ocrModel.wordCount() << "lines" << m_ocrModel.lines().size();
+                const auto& lines = m_ocrModel.lines();
+                for (size_t li = 0; li < lines.size() && li < 4; ++li) {
+                    const auto& L = lines[li];
+                    qWarning() << "[OvRes] line" << li << L.logicalRect << "wordIdx" << L.wordIndices.size()
+                               << (L.wordIndices.empty() ? QString() : m_ocrModel.word(L.wordIndices.front()).text);
+                }
+            }
             update();
         }
     });
 }
 
 int OverlayWidget::findOcrWordAt(const QPoint& localPos) const {
-    if (m_ocrWords.empty() || !m_selectionModel->hasSelection()) return -1;
+    if (!m_ocrModel.hasWords() || !m_selectionModel->hasSelection()) return -1;
     QRect localSel = m_selectionModel->rect().translated(-m_target.logicalGeometry.topLeft());
     if (!localSel.contains(localPos)) return -1;
-
-    QPoint ptInSel = localPos - localSel.topLeft();
-    for (size_t i = 0; i < m_ocrWords.size(); ++i) {
-        QRect hitBox = m_ocrWords[i].logicalRect.adjusted(-3, -2, 3, 2);
-        if (hitBox.contains(ptInSel)) {
-            return static_cast<int>(i);
-        }
-    }
-    return -1;
+    return m_ocrModel.findWordAt(localPos - localSel.topLeft());
 }
 
 int OverlayWidget::findNearestOcrWordAt(const QPoint& localPos) const {
-    if (m_ocrWords.empty() || !m_selectionModel->hasSelection()) return -1;
+    if (!m_ocrModel.hasWords() || !m_selectionModel->hasSelection()) return -1;
     QRect localSel = m_selectionModel->rect().translated(-m_target.logicalGeometry.topLeft());
-    QPoint ptInSel = localPos - localSel.topLeft();
-
-    // 1. Direct hit test first
-    int exactHit = findOcrWordAt(localPos);
-    if (exactHit != -1) return exactHit;
-
-    // 2. Line-aware nearest test
-    if (!m_ocrLines.empty()) {
-        int bestLine = -1;
-        int bestDistY = std::numeric_limits<int>::max();
-
-        for (size_t l = 0; l < m_ocrLines.size(); ++l) {
-            const auto& line = m_ocrLines[l];
-            if (line.wordIndices.empty()) continue;
-            int distY = 0;
-            if (ptInSel.y() < line.logicalRect.top()) {
-                distY = line.logicalRect.top() - ptInSel.y();
-            } else if (ptInSel.y() > line.logicalRect.bottom()) {
-                distY = ptInSel.y() - line.logicalRect.bottom();
-            }
-            if (distY < bestDistY) {
-                bestDistY = distY;
-                bestLine = static_cast<int>(l);
-            }
-        }
-
-        if (bestLine != -1) {
-            const auto& line = m_ocrLines[bestLine];
-            int bestWord = line.wordIndices[0];
-            int bestDistX = std::numeric_limits<int>::max();
-
-            for (int wIdx : line.wordIndices) {
-                const auto& w = m_ocrWords[wIdx];
-                int distX = 0;
-                if (ptInSel.x() < w.logicalRect.left()) {
-                    distX = w.logicalRect.left() - ptInSel.x();
-                } else if (ptInSel.x() > w.logicalRect.right()) {
-                    distX = ptInSel.x() - w.logicalRect.right();
-                }
-                if (distX < bestDistX) {
-                    bestDistX = distX;
-                    bestWord = wIdx;
-                }
-            }
-            return bestWord;
-        }
-    }
-
-    // 3. Fallback: closest center distance
-    int bestWord = -1;
-    qint64 bestDistSq = std::numeric_limits<qint64>::max();
-    for (size_t i = 0; i < m_ocrWords.size(); ++i) {
-        QPoint c = m_ocrWords[i].logicalRect.center();
-        qint64 dx = c.x() - ptInSel.x();
-        qint64 dy = c.y() - ptInSel.y();
-        qint64 dsq = dx * dx + dy * dy;
-        if (dsq < bestDistSq) {
-            bestDistSq = dsq;
-            bestWord = static_cast<int>(i);
-        }
-    }
-    return bestWord;
+    return m_ocrModel.findNearestWordAt(localPos - localSel.topLeft());
 }
 
 void OverlayWidget::updateSelectedOcrRange(int anchorIdx, int currentIdx) {
-    if (anchorIdx < 0 || anchorIdx >= static_cast<int>(m_ocrWords.size()) ||
-        currentIdx < 0 || currentIdx >= static_cast<int>(m_ocrWords.size())) return;
-
-    m_selectedOcrIndices.clear();
-
-    const auto& wA = m_ocrWords[anchorIdx];
-    const auto& wB = m_ocrWords[currentIdx];
-
-    bool aBeforeB = true;
-    if (wA.lineIndex != -1 && wB.lineIndex != -1) {
-        if (wA.lineIndex > wB.lineIndex) {
-            aBeforeB = false;
-        } else if (wA.lineIndex == wB.lineIndex) {
-            aBeforeB = (wA.logicalRect.left() <= wB.logicalRect.left());
-        }
-    } else {
-        if (wA.lineNum > wB.lineNum) {
-            aBeforeB = false;
-        } else if (wA.lineNum == wB.lineNum) {
-            aBeforeB = (wA.logicalRect.left() <= wB.logicalRect.left());
-        }
-    }
-
-    int startIdx = aBeforeB ? anchorIdx : currentIdx;
-    int endIdx = aBeforeB ? currentIdx : anchorIdx;
-    const auto& wStart = m_ocrWords[startIdx];
-    const auto& wEnd = m_ocrWords[endIdx];
-
-    if (!m_ocrLines.empty() && wStart.lineIndex >= 0 && wEnd.lineIndex >= 0 &&
-        wStart.lineIndex < static_cast<int>(m_ocrLines.size()) &&
-        wEnd.lineIndex < static_cast<int>(m_ocrLines.size())) {
-
-        int lStart = wStart.lineIndex;
-        int lEnd = wEnd.lineIndex;
-
-        if (lStart == lEnd) {
-            int minX = std::min(wStart.logicalRect.left(), wEnd.logicalRect.left());
-            int maxX = std::max(wStart.logicalRect.right(), wEnd.logicalRect.right());
-            for (int wIdx : m_ocrLines[lStart].wordIndices) {
-                const auto& w = m_ocrWords[wIdx];
-                if (w.logicalRect.right() >= minX && w.logicalRect.left() <= maxX) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-        } else {
-            // Line lStart: from wStart to end of line
-            for (int wIdx : m_ocrLines[lStart].wordIndices) {
-                if (m_ocrWords[wIdx].logicalRect.left() >= wStart.logicalRect.left() - 4) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-            // Intermediate lines: all words
-            for (int l = lStart + 1; l < lEnd; ++l) {
-                for (int wIdx : m_ocrLines[l].wordIndices) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-            // Line lEnd: from start of line up to wEnd
-            for (int wIdx : m_ocrLines[lEnd].wordIndices) {
-                if (m_ocrWords[wIdx].logicalRect.right() <= wEnd.logicalRect.right() + 4) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-        }
-    } else {
-        int lo = std::min(anchorIdx, currentIdx);
-        int hi = std::max(anchorIdx, currentIdx);
-        for (int i = lo; i <= hi; ++i) {
-            m_selectedOcrIndices.push_back(i);
-        }
-    }
-
-    // Sort in reading order
-    std::sort(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end(), [this](int a, int b) {
-        const auto& wa = m_ocrWords[a];
-        const auto& wb = m_ocrWords[b];
-        if (wa.lineIndex != wb.lineIndex) return wa.lineIndex < wb.lineIndex;
-        return wa.logicalRect.left() < wb.logicalRect.left();
-    });
+    m_ocrModel.updateSelectedRange(anchorIdx, currentIdx);
 }
 
 QList<QRect> OverlayWidget::getContinuousHighlightRects() const {
     QList<QRect> rects;
-    if (m_selectedOcrIndices.empty() || m_ocrWords.empty() || !m_selectionModel->hasSelection()) {
+    if (!m_ocrModel.hasSelection() || !m_selectionModel->hasSelection()) {
         return rects;
     }
 
     QRect localSel = m_selectionModel->rect().translated(-m_target.logicalGeometry.topLeft());
-    std::unordered_set<int> selSet(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end());
-
-    if (!m_ocrLines.empty()) {
-        for (const auto& line : m_ocrLines) {
-            std::vector<int> lineWords;
-            for (int wIdx : line.wordIndices) {
-                if (selSet.count(wIdx)) {
-                    lineWords.push_back(wIdx);
-                }
-            }
-            if (lineWords.empty()) continue;
-
-            std::sort(lineWords.begin(), lineWords.end(), [this](int a, int b) {
-                return m_ocrWords[a].logicalRect.left() < m_ocrWords[b].logicalRect.left();
-            });
-
-            int runLeft = m_ocrWords[lineWords[0]].logicalRect.left();
-            int runRight = m_ocrWords[lineWords[0]].logicalRect.right();
-            int lineTop = line.logicalRect.top();
-            int lineH = line.logicalRect.height();
-            int maxGap = std::max(20, lineH);
-
-            for (size_t i = 1; i < lineWords.size(); ++i) {
-                const auto& w = m_ocrWords[lineWords[i]];
-                if (w.logicalRect.left() <= runRight + maxGap) {
-                    runRight = std::max(runRight, w.logicalRect.right());
-                } else {
-                    QRect r(runLeft - 2, lineTop - 1, (runRight - runLeft) + 4, lineH + 2);
-                    rects.append(r.translated(localSel.topLeft()));
-                    runLeft = w.logicalRect.left();
-                    runRight = w.logicalRect.right();
-                }
-            }
-            QRect r(runLeft - 2, lineTop - 1, (runRight - runLeft) + 4, lineH + 2);
-            rects.append(r.translated(localSel.topLeft()));
-        }
-    } else {
-        std::map<int, std::vector<int>> wordsByLine;
-        for (int idx : m_selectedOcrIndices) {
-            if (idx >= 0 && idx < static_cast<int>(m_ocrWords.size())) {
-                wordsByLine[m_ocrWords[idx].lineNum].push_back(idx);
-            }
-        }
-        for (auto& [lineNum, wordList] : wordsByLine) {
-            std::sort(wordList.begin(), wordList.end(), [this](int a, int b) {
-                return m_ocrWords[a].logicalRect.left() < m_ocrWords[b].logicalRect.left();
-            });
-            int runLeft = m_ocrWords[wordList[0]].logicalRect.left();
-            int runRight = m_ocrWords[wordList[0]].logicalRect.right();
-            int runTop = m_ocrWords[wordList[0]].logicalRect.top();
-            int runBottom = m_ocrWords[wordList[0]].logicalRect.bottom();
-            for (size_t i = 1; i < wordList.size(); ++i) {
-                const auto& w = m_ocrWords[wordList[i]];
-                if (w.logicalRect.left() <= runRight + 25) {
-                    runRight = std::max(runRight, w.logicalRect.right());
-                    runTop = std::min(runTop, w.logicalRect.top());
-                    runBottom = std::max(runBottom, w.logicalRect.bottom());
-                } else {
-                    QRect r(runLeft - 2, runTop - 1, (runRight - runLeft) + 4, (runBottom - runTop) + 2);
-                    rects.append(r.translated(localSel.topLeft()));
-                    runLeft = w.logicalRect.left();
-                    runRight = w.logicalRect.right();
-                    runTop = w.logicalRect.top();
-                    runBottom = w.logicalRect.bottom();
-                }
-            }
-            QRect r(runLeft - 2, runTop - 1, (runRight - runLeft) + 4, (runBottom - runTop) + 2);
-            rects.append(r.translated(localSel.topLeft()));
-        }
+    rects = m_ocrModel.highlightRects();
+    for (auto& r : rects) {
+        r.translate(localSel.topLeft());
+    }
+    if (ocrOverlayDbg()) {
+        for (const auto& r : rects)
+            qWarning() << "[OvRibbon] rect" << r << "localSel" << localSel;
     }
     return rects;
 }
 
 QString OverlayWidget::getSelectedOcrText() const {
-    if (m_selectedOcrIndices.empty()) return QString();
-    QString text;
-    int prevLine = -1;
-    for (int idx : m_selectedOcrIndices) {
-        if (idx < 0 || idx >= static_cast<int>(m_ocrWords.size())) continue;
-        const auto& w = m_ocrWords[idx];
-        if (prevLine != -1 && w.lineNum != prevLine) {
-            text += "\n";
-        } else if (prevLine != -1 && !text.isEmpty() && !text.endsWith("\n") && !text.endsWith(" ")) {
-            bool isAsciiA = text.back().toLatin1() > 0 && !text.back().isSpace();
-            bool isAsciiB = !w.text.isEmpty() && w.text.front().toLatin1() > 0;
-            if (isAsciiA && isAsciiB) {
-                text += " ";
-            }
-        }
-        text += w.text;
-        prevLine = w.lineNum;
-    }
-    return text;
+    return m_ocrModel.selectedText();
 }
 
 QRect OverlayWidget::getSelectedOcrVisualBoundingRect() const {
-    auto rects = getContinuousHighlightRects();
-    if (rects.isEmpty()) return QRect();
-    QRect united = rects[0];
-    for (int i = 1; i < rects.size(); ++i) {
-        united = united.united(rects[i]);
+    if (!m_selectionModel->hasSelection()) return QRect();
+    QRect united = m_ocrModel.selectedBoundingRect();
+    if (!united.isNull()) {
+        united.translate(m_selectionModel->rect().translated(-m_target.logicalGeometry.topLeft()).topLeft());
     }
     return united;
 }
 
 void OverlayWidget::updateTextBubble() {
-    if (m_selectedOcrIndices.empty() || !m_selectionModel->hasSelection()) {
+    if (!m_ocrModel.hasSelection() || !m_selectionModel->hasSelection()) {
         if (m_textBubble) {
             m_textBubble->hideBubble();
         }
@@ -539,10 +331,9 @@ void OverlayWidget::paintEvent(QPaintEvent* event) {
         }
 
         // B. Hovered OCR text box (if not already selected)
-        if (m_hoveredOcrIndex >= 0 && m_hoveredOcrIndex < static_cast<int>(m_ocrWords.size())) {
-            bool alreadySel = std::find(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end(), m_hoveredOcrIndex) != m_selectedOcrIndices.end();
-            if (!alreadySel) {
-                const auto& item = m_ocrWords[m_hoveredOcrIndex];
+        if (m_ocrModel.hoveredIndex() >= 0 && m_ocrModel.hoveredIndex() < m_ocrModel.wordCount()) {
+            if (!m_ocrModel.isSelected(m_ocrModel.hoveredIndex())) {
+                const auto& item = m_ocrModel.word(m_ocrModel.hoveredIndex());
                 QRect wordRect = item.logicalRect.translated(localSel.topLeft());
                 painter.setPen(QPen(QColor(22, 119, 255, 180), 1, Qt::DashLine));
                 painter.setBrush(QColor(22, 119, 255, 35));
@@ -630,6 +421,9 @@ bool OverlayWidget::isNearSelectionBorder(const QPoint& globalPos, int margin) c
 }
 
 void OverlayWidget::mousePressEvent(QMouseEvent* event) {
+    if (ocrOverlayDbg())
+        qWarning() << "[OvPress] local" << event->pos() << "global" << event->globalPosition().toPoint()
+                   << "btn" << event->button();
     if (m_longCaptureMode) {
         event->ignore();
         return;
@@ -666,12 +460,14 @@ void OverlayWidget::mousePressEvent(QMouseEvent* event) {
         if (tool == annotation::ToolType::None) {
             // Check if user clicked an OCR text word
             int hitWord = findOcrWordAt(event->pos());
+            if (ocrOverlayDbg())
+                qWarning() << "[OvHit] pos" << event->pos() << "hit" << hitWord << "nWords" << m_ocrModel.wordCount();
             if (hitWord != -1) {
                 m_isSelectingText = true;
                 m_textSelectStart = event->pos();
                 m_textSelectCurrent = event->pos();
                 m_textSelectAnchorIndex = hitWord;
-                m_selectedOcrIndices = { hitWord };
+                m_ocrModel.selectSingle(hitWord);
                 if (m_textBubble) {
                     m_textBubble->hideBubble();
                 }
@@ -680,8 +476,8 @@ void OverlayWidget::mousePressEvent(QMouseEvent* event) {
             }
 
             // Click outside any word: if text was selected, clear it
-            if (!m_selectedOcrIndices.empty()) {
-                m_selectedOcrIndices.clear();
+            if (m_ocrModel.hasSelection()) {
+                m_ocrModel.clearSelection();
                 m_textSelectAnchorIndex = -1;
                 if (m_textBubble) {
                     m_textBubble->hideBubble();
@@ -787,8 +583,8 @@ void OverlayWidget::mousePressEvent(QMouseEvent* event) {
             m_toolbar->setSelectedTool(annotation::ToolType::None);
             m_previewItem = nullptr;
             update();
-        } else if (!m_selectedOcrIndices.empty()) {
-            m_selectedOcrIndices.clear();
+        } else if (m_ocrModel.hasSelection()) {
+            m_ocrModel.clearSelection();
             m_textSelectAnchorIndex = -1;
             updateTextBubble();
             update();
@@ -796,8 +592,7 @@ void OverlayWidget::mousePressEvent(QMouseEvent* event) {
             m_selectionModel->clear();
             m_toolbar->hide();
             if (m_textBubble) m_textBubble->hideBubble();
-            m_ocrWords.clear();
-            m_ocrLines.clear();
+            m_ocrModel.clearResult();
             update();
         } else {
             onClose();
@@ -857,6 +652,10 @@ void OverlayWidget::mouseMoveEvent(QMouseEvent* event) {
         int nearestWord = findNearestOcrWordAt(localPos);
         if (nearestWord != -1 && m_textSelectAnchorIndex != -1) {
             updateSelectedOcrRange(m_textSelectAnchorIndex, nearestWord);
+            if (ocrOverlayDbg())
+                qWarning() << "[OvDrag] anchor" << m_textSelectAnchorIndex << "cur" << nearestWord
+                           << "nSel" << m_ocrModel.selectedIndices().size()
+                           << "wordRect" << m_ocrModel.word(nearestWord).logicalRect;
         }
         update();
         return;
@@ -925,16 +724,23 @@ void OverlayWidget::mouseMoveEvent(QMouseEvent* event) {
         if (m_selectionModel->rect().contains(globalPos)) {
             if (tool == annotation::ToolType::None) {
                 int hitWord = findOcrWordAt(localPos);
+                if (ocrOverlayDbg()) {
+                    static QPoint lastLoggedHoverPos{-9999, -9999};
+                    if (localPos != lastLoggedHoverPos) {
+                        lastLoggedHoverPos = localPos;
+                        qWarning() << "[OvHover] pos" << localPos << "hit" << hitWord << "nWords" << m_ocrModel.wordCount();
+                    }
+                }
                 if (hitWord != -1) {
-                    if (m_hoveredOcrIndex != hitWord) {
-                        m_hoveredOcrIndex = hitWord;
+                    if (m_ocrModel.hoveredIndex() != hitWord) {
+                        m_ocrModel.setHoveredIndex(hitWord);
                         update();
                     }
                     setCursor(Qt::IBeamCursor);
                     return;
                 } else {
-                    if (m_hoveredOcrIndex != -1) {
-                        m_hoveredOcrIndex = -1;
+                    if (m_ocrModel.hoveredIndex() != -1) {
+                        m_ocrModel.setHoveredIndex(-1);
                         update();
                     }
                     setCursor(Qt::SizeAllCursor);
@@ -996,6 +802,10 @@ void OverlayWidget::positionMagnifier(const QPoint& localPos) {
 }
 
 void OverlayWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (ocrOverlayDbg())
+        qWarning() << "[OvRelease] local" << event->pos() << "global" << event->globalPosition().toPoint()
+                   << "state" << static_cast<int>(m_selectionModel->state())
+                   << "hasSel" << m_selectionModel->hasSelection();
     if (m_longCaptureMode) {
         event->ignore();
         return;
@@ -1040,21 +850,8 @@ void OverlayWidget::mouseDoubleClickEvent(QMouseEvent* event) {
         int hitWord = findOcrWordAt(event->pos());
         if (hitWord != -1) {
             // Select whole line of text on double click
-            const auto& w = m_ocrWords[hitWord];
-            m_selectedOcrIndices.clear();
-            if (!m_ocrLines.empty() && w.lineIndex >= 0 && w.lineIndex < static_cast<int>(m_ocrLines.size())) {
-                for (int wIdx : m_ocrLines[w.lineIndex].wordIndices) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            } else {
-                int targetLine = w.lineNum;
-                for (size_t i = 0; i < m_ocrWords.size(); ++i) {
-                    if (m_ocrWords[i].lineNum == targetLine) {
-                        m_selectedOcrIndices.push_back(static_cast<int>(i));
-                    }
-                }
-            }
-            m_textSelectAnchorIndex = m_selectedOcrIndices.empty() ? -1 : m_selectedOcrIndices.front();
+            m_ocrModel.selectLineOf(hitWord);
+            m_textSelectAnchorIndex = m_ocrModel.selectedIndices().empty() ? -1 : m_ocrModel.selectedIndices().front();
             updateTextBubble();
             update();
             event->accept();
@@ -1160,10 +957,7 @@ void OverlayWidget::onSelectionStateChanged(SelectionState state) {
         m_toolbar->hide();
         if (m_textBubble) m_textBubble->hideBubble();
         m_ocrService->cancel();
-        m_ocrWords.clear();
-        m_ocrLines.clear();
-        m_selectedOcrIndices.clear();
-        m_hoveredOcrIndex = -1;
+        m_ocrModel.clearResult();
     }
     update();
 }
@@ -1172,8 +966,8 @@ void OverlayWidget::onToolSelected(annotation::ToolType tool) {
     m_annotationEngine->setTool(tool);
     if (tool != annotation::ToolType::None) {
         setCursor(Qt::CrossCursor);
-        m_selectedOcrIndices.clear();
-        m_hoveredOcrIndex = -1;
+        m_ocrModel.clearSelection();
+        m_ocrModel.setHoveredIndex(-1);
         if (m_textBubble) m_textBubble->hideBubble();
     } else {
         setCursor(Qt::ArrowCursor);
@@ -1353,7 +1147,7 @@ void OverlayWidget::keyPressEvent(QKeyEvent* event) {
             onCopy();
         }
     } else if (event->matches(QKeySequence::Copy)) {
-        if (!m_selectedOcrIndices.empty()) {
+        if (m_ocrModel.hasSelection()) {
             QString textToCopy = getSelectedOcrText();
             QGuiApplication::clipboard()->setText(textToCopy);
             QString previewSnippet = textToCopy.left(18);

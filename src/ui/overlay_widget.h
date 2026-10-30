@@ -12,6 +12,7 @@
 #include <vector>
 #include "../platform/capture_manager.h"
 #include "../core/ocr_service.h"
+#include "../core/ocr_text_model.h"
 #include "selection_model.h"
 #include "magnifier.h"
 #include "toolbar.h"
@@ -109,10 +110,7 @@ private:
 
     // In-place OCR word selection state
     std::unique_ptr<core::OcrService> m_ocrService;
-    std::vector<core::OcrWordItem> m_ocrWords;
-    std::vector<core::OcrLineItem> m_ocrLines;
-    std::vector<int> m_selectedOcrIndices;
-    int m_hoveredOcrIndex = -1;
+    core::OcrTextModel m_ocrModel;
     bool m_isSelectingText = false;
     bool m_longCaptureMode = false;
     int m_textSelectAnchorIndex = -1;

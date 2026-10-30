@@ -12,6 +12,8 @@
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QWindow>
+#include <QTimer>
+#include <QCursor>
 #include <algorithm>
 #include <unordered_set>
 #include <limits>
@@ -42,6 +44,15 @@ PinWindow::PinWindow(const QPixmap& pixmap, const QPoint& initialPos, QWidget* p
     setCursor(Qt::SizeAllCursor);
     show();
 
+    if (qEnvironmentVariableIsSet("FOURYSHOT_OCR_DEBUG")) {
+        qInfo() << "[Pin] created" << frameGeometry() << "pixmap" << m_pixmap.width() << "x" << m_pixmap.height() << "dpr" << dpr;
+        auto* dbgTimer = new QTimer(this);
+        connect(dbgTimer, &QTimer::timeout, this, [this]() {
+            qInfo() << "[Pin] cursor" << QCursor::pos();
+        });
+        dbgTimer->start(150);
+    }
+
     m_textBubble = new ui::TextSelectionBubble(this);
 
     // PinWindow lays out and hit-tests against the pixmap's raw pixel dimensions.
@@ -50,9 +61,7 @@ PinWindow::PinWindow(const QPixmap& pixmap, const QPoint& initialPos, QWidget* p
     m_ocrService = std::make_unique<core::OcrService>(this);
     m_ocrService->recognizeAsync(m_pixmap, m_pixmap.devicePixelRatio(), [this](const core::OcrResult& res) {
         if (res.success) {
-            m_ocrWords = res.words;
-            m_ocrLines = res.lines;
-            m_fullOcrText = res.fullText;
+            m_ocrModel.setResult(res);
             m_ocrReady = true;
             update();
         }
@@ -102,8 +111,8 @@ void PinWindow::openOcrDialog() {
 }
 
 void PinWindow::copyAllOcrText() {
-    if (!m_fullOcrText.isEmpty()) {
-        QGuiApplication::clipboard()->setText(m_fullOcrText);
+    if (!m_ocrModel.fullText().isEmpty()) {
+        QGuiApplication::clipboard()->setText(m_ocrModel.fullText());
     } else {
         openOcrDialog();
     }
@@ -120,186 +129,65 @@ Qt::Edges PinWindow::hitTestBorderEdges(const QPoint& pt) const {
 }
 
 int PinWindow::findOcrWordAt(const QPoint& localPos) const {
-    if (m_ocrWords.empty()) return -1;
+    if (!m_ocrModel.hasWords()) return -1;
     QRect contentRect = rect().adjusted(4, 4, -4, -4);
     if (!contentRect.contains(localPos)) return -1;
 
-    // Scale from contentRect (logical window coords) back to the pixmap's
-    // logical pixel space. The DPR is already factored into the window size,
-    // so logicalWidth(width()/dpr) must be used to keep the mapping correct
-    // on HiDPI screens.
-    const qreal dpr = m_pixmap.devicePixelRatio();
-    qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
-    qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
-
-    QPoint ptInImage(
+    // Scale from contentRect (logical window coords) to the pixmap's logical
+    // pixel space; word rects live in that space.
+    const qreal dpr = m_pixmap.devicePixelRatio() > 0.0 ? m_pixmap.devicePixelRatio() : 1.0;
+    const qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    const qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
+    const QPoint ptInImage(
         static_cast<int>((localPos.x() - contentRect.left()) / scaleX),
         static_cast<int>((localPos.y() - contentRect.top()) / scaleY)
     );
-
-    for (size_t i = 0; i < m_ocrWords.size(); ++i) {
-        QRect hitBox = m_ocrWords[i].logicalRect.adjusted(-3, -2, 3, 2);
-        if (hitBox.contains(ptInImage)) {
-            return static_cast<int>(i);
-        }
-    }
-    return -1;
+    return m_ocrModel.findWordAt(ptInImage);
 }
 
 int PinWindow::findNearestOcrWordAt(const QPoint& localPos) const {
-    if (m_ocrWords.empty() || m_pixmap.width() <= 0 || m_pixmap.height() <= 0) return -1;
+    if (!m_ocrModel.hasWords() || m_pixmap.width() <= 0 || m_pixmap.height() <= 0) return -1;
     QRect contentRect = rect().adjusted(4, 4, -4, -4);
 
-    const qreal dpr = m_pixmap.devicePixelRatio();
-    qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
-    qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
+    const qreal dpr = m_pixmap.devicePixelRatio() > 0.0 ? m_pixmap.devicePixelRatio() : 1.0;
+    const qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    const qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
 
-    int clampedX = std::clamp(localPos.x(), contentRect.left(), contentRect.right());
-    int clampedY = std::clamp(localPos.y(), contentRect.top(), contentRect.bottom());
-
-    QPoint ptInImage(
+    const int clampedX = std::clamp(localPos.x(), contentRect.left(), contentRect.right());
+    const int clampedY = std::clamp(localPos.y(), contentRect.top(), contentRect.bottom());
+    const QPoint ptInImage(
         static_cast<int>((clampedX - contentRect.left()) / scaleX),
         static_cast<int>((clampedY - contentRect.top()) / scaleY)
     );
-
-    int exact = findOcrWordAt(localPos);
-    if (exact != -1) return exact;
-
-    if (!m_ocrLines.empty()) {
-        int bestLine = -1;
-        int bestDistY = std::numeric_limits<int>::max();
-        for (size_t l = 0; l < m_ocrLines.size(); ++l) {
-            const auto& line = m_ocrLines[l];
-            if (line.wordIndices.empty()) continue;
-            int distY = 0;
-            if (ptInImage.y() < line.logicalRect.top()) distY = line.logicalRect.top() - ptInImage.y();
-            else if (ptInImage.y() > line.logicalRect.bottom()) distY = ptInImage.y() - line.logicalRect.bottom();
-            if (distY < bestDistY) {
-                bestDistY = distY;
-                bestLine = static_cast<int>(l);
-            }
-        }
-        if (bestLine != -1) {
-            const auto& line = m_ocrLines[bestLine];
-            int bestWord = line.wordIndices[0];
-            int bestDistX = std::numeric_limits<int>::max();
-            for (int wIdx : line.wordIndices) {
-                const auto& w = m_ocrWords[wIdx];
-                int distX = 0;
-                if (ptInImage.x() < w.logicalRect.left()) distX = w.logicalRect.left() - ptInImage.x();
-                else if (ptInImage.x() > w.logicalRect.right()) distX = ptInImage.x() - w.logicalRect.right();
-                if (distX < bestDistX) {
-                    bestDistX = distX;
-                    bestWord = wIdx;
-                }
-            }
-            return bestWord;
-        }
-    }
-
-    int bestWord = -1;
-    qint64 bestDistSq = std::numeric_limits<qint64>::max();
-    for (size_t i = 0; i < m_ocrWords.size(); ++i) {
-        QPoint c = m_ocrWords[i].logicalRect.center();
-        qint64 dx = c.x() - ptInImage.x();
-        qint64 dy = c.y() - ptInImage.y();
-        qint64 dsq = dx * dx + dy * dy;
-        if (dsq < bestDistSq) {
-            bestDistSq = dsq;
-            bestWord = static_cast<int>(i);
-        }
-    }
-    return bestWord;
+    return m_ocrModel.findNearestWordAt(ptInImage);
 }
 
 void PinWindow::updateSelectedOcrRange(int anchorIdx, int currentIdx) {
-    if (anchorIdx < 0 || anchorIdx >= static_cast<int>(m_ocrWords.size()) ||
-        currentIdx < 0 || currentIdx >= static_cast<int>(m_ocrWords.size())) return;
-
-    m_selectedOcrIndices.clear();
-
-    const auto& wA = m_ocrWords[anchorIdx];
-    const auto& wB = m_ocrWords[currentIdx];
-
-    bool aBeforeB = true;
-    if (wA.lineIndex != -1 && wB.lineIndex != -1) {
-        if (wA.lineIndex > wB.lineIndex) {
-            aBeforeB = false;
-        } else if (wA.lineIndex == wB.lineIndex) {
-            aBeforeB = (wA.logicalRect.left() <= wB.logicalRect.left());
-        }
-    } else {
-        if (wA.lineNum > wB.lineNum) {
-            aBeforeB = false;
-        } else if (wA.lineNum == wB.lineNum) {
-            aBeforeB = (wA.logicalRect.left() <= wB.logicalRect.left());
-        }
-    }
-
-    int startIdx = aBeforeB ? anchorIdx : currentIdx;
-    int endIdx = aBeforeB ? currentIdx : anchorIdx;
-    const auto& wStart = m_ocrWords[startIdx];
-    const auto& wEnd = m_ocrWords[endIdx];
-
-    if (!m_ocrLines.empty() && wStart.lineIndex >= 0 && wEnd.lineIndex >= 0 &&
-        wStart.lineIndex < static_cast<int>(m_ocrLines.size()) &&
-        wEnd.lineIndex < static_cast<int>(m_ocrLines.size())) {
-
-        int lStart = wStart.lineIndex;
-        int lEnd = wEnd.lineIndex;
-
-        if (lStart == lEnd) {
-            int minX = std::min(wStart.logicalRect.left(), wEnd.logicalRect.left());
-            int maxX = std::max(wStart.logicalRect.right(), wEnd.logicalRect.right());
-            for (int wIdx : m_ocrLines[lStart].wordIndices) {
-                const auto& w = m_ocrWords[wIdx];
-                if (w.logicalRect.right() >= minX && w.logicalRect.left() <= maxX) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-        } else {
-            for (int wIdx : m_ocrLines[lStart].wordIndices) {
-                if (m_ocrWords[wIdx].logicalRect.left() >= wStart.logicalRect.left() - 4) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-            for (int l = lStart + 1; l < lEnd; ++l) {
-                for (int wIdx : m_ocrLines[l].wordIndices) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-            for (int wIdx : m_ocrLines[lEnd].wordIndices) {
-                if (m_ocrWords[wIdx].logicalRect.right() <= wEnd.logicalRect.right() + 4) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            }
-        }
-    } else {
-        int lo = std::min(anchorIdx, currentIdx);
-        int hi = std::max(anchorIdx, currentIdx);
-        for (int i = lo; i <= hi; ++i) {
-            m_selectedOcrIndices.push_back(i);
-        }
-    }
-
-    std::sort(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end(), [this](int a, int b) {
-        const auto& wa = m_ocrWords[a];
-        const auto& wb = m_ocrWords[b];
-        if (wa.lineIndex != wb.lineIndex) return wa.lineIndex < wb.lineIndex;
-        return wa.logicalRect.left() < wb.logicalRect.left();
-    });
+    m_ocrModel.updateSelectedRange(anchorIdx, currentIdx);
 }
 
 QList<QRect> PinWindow::getContinuousHighlightRects() const {
     QList<QRect> rects;
-    if (m_selectedOcrIndices.empty() || m_ocrWords.empty()) return rects;
+    if (!m_ocrModel.hasSelection() || m_pixmap.width() <= 0 || m_pixmap.height() <= 0) return rects;
+
+    const bool debug = qEnvironmentVariableIsSet("FOURYSHOT_OCR_DEBUG");
+    if (debug) {
+        qInfo() << "[Highlight] selected" << m_ocrModel.selectedIndices().size()
+                << "words" << m_ocrModel.wordCount() << "lines" << m_ocrModel.lines().size()
+                << "pixmap" << m_pixmap.width() << "x" << m_pixmap.height()
+                << "dpr" << m_pixmap.devicePixelRatio();
+        for (int idx : m_ocrModel.selectedIndices()) {
+            if (idx >= 0 && idx < m_ocrModel.wordCount()) {
+                qInfo() << "[Highlight] word" << idx << m_ocrModel.word(idx).logicalRect
+                        << m_ocrModel.word(idx).text;
+            }
+        }
+    }
 
     QRect contentRect = rect().adjusted(4, 4, -4, -4);
-    const qreal dpr = m_pixmap.devicePixelRatio();
-    qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
-    qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
-
-    std::unordered_set<int> selSet(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end());
+    const qreal dpr = m_pixmap.devicePixelRatio() > 0.0 ? m_pixmap.devicePixelRatio() : 1.0;
+    const qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    const qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
 
     auto toVisual = [&](int left, int top, int width, int height) {
         return QRect(
@@ -310,111 +198,40 @@ QList<QRect> PinWindow::getContinuousHighlightRects() const {
         );
     };
 
-    if (!m_ocrLines.empty()) {
-        for (const auto& line : m_ocrLines) {
-            std::vector<int> lineWords;
-            for (int wIdx : line.wordIndices) {
-                if (selSet.count(wIdx)) lineWords.push_back(wIdx);
-            }
-            if (lineWords.empty()) continue;
+    // Model returns rects in OCR logical space; map them into window space.
+    for (const QRect& r : m_ocrModel.highlightRects()) {
+        rects.append(toVisual(r.left(), r.top(), r.width(), r.height()));
+    }
 
-            std::sort(lineWords.begin(), lineWords.end(), [this](int a, int b) {
-                return m_ocrWords[a].logicalRect.left() < m_ocrWords[b].logicalRect.left();
-            });
-
-            int runLeft = m_ocrWords[lineWords[0]].logicalRect.left();
-            int runRight = m_ocrWords[lineWords[0]].logicalRect.right();
-            int runTop = m_ocrWords[lineWords[0]].logicalRect.top();
-            int runBottom = m_ocrWords[lineWords[0]].logicalRect.bottom();
-            int maxGap = std::max(20, line.logicalRect.height());
-
-            for (size_t i = 1; i < lineWords.size(); ++i) {
-                const auto& w = m_ocrWords[lineWords[i]];
-                if (w.logicalRect.left() <= runRight + maxGap) {
-                    runRight = std::max(runRight, w.logicalRect.right());
-                    runTop = std::min(runTop, w.logicalRect.top());
-                    runBottom = std::max(runBottom, w.logicalRect.bottom());
-                } else {
-                    rects.append(toVisual(runLeft - 2, runTop - 1,
-                                          (runRight - runLeft) + 4, (runBottom - runTop) + 3));
-                    runLeft = w.logicalRect.left();
-                    runRight = w.logicalRect.right();
-                    runTop = w.logicalRect.top();
-                    runBottom = w.logicalRect.bottom();
-                }
-            }
-            rects.append(toVisual(runLeft - 2, runTop - 1,
-                                  (runRight - runLeft) + 4, (runBottom - runTop) + 3));
-        }
-    } else {
-        std::map<int, std::vector<int>> wordsByLine;
-        for (int idx : m_selectedOcrIndices) {
-            if (idx >= 0 && idx < static_cast<int>(m_ocrWords.size())) {
-                wordsByLine[m_ocrWords[idx].lineNum].push_back(idx);
-            }
-        }
-        for (auto& [lineNum, wordList] : wordsByLine) {
-            std::sort(wordList.begin(), wordList.end(), [this](int a, int b) {
-                return m_ocrWords[a].logicalRect.left() < m_ocrWords[b].logicalRect.left();
-            });
-            int runLeft = m_ocrWords[wordList[0]].logicalRect.left();
-            int runRight = m_ocrWords[wordList[0]].logicalRect.right();
-            int runTop = m_ocrWords[wordList[0]].logicalRect.top();
-            int runBottom = m_ocrWords[wordList[0]].logicalRect.bottom();
-            for (size_t i = 1; i < wordList.size(); ++i) {
-                const auto& w = m_ocrWords[wordList[i]];
-                if (w.logicalRect.left() <= runRight + 25) {
-                    runRight = std::max(runRight, w.logicalRect.right());
-                    runTop = std::min(runTop, w.logicalRect.top());
-                    runBottom = std::max(runBottom, w.logicalRect.bottom());
-                } else {
-                    rects.append(toVisual(runLeft - 2, runTop - 1, (runRight - runLeft) + 4, (runBottom - runTop) + 2));
-                    runLeft = w.logicalRect.left();
-                    runRight = w.logicalRect.right();
-                    runTop = w.logicalRect.top();
-                    runBottom = w.logicalRect.bottom();
-                }
-            }
-            rects.append(toVisual(runLeft - 2, runTop - 1, (runRight - runLeft) + 4, (runBottom - runTop) + 2));
-        }
+    if (debug) {
+        qInfo() << "[Highlight] ribbon rects" << rects.size();
+        for (const auto& r : rects) qInfo() << "[Highlight] ribbon" << r;
     }
     return rects;
 }
 
 QString PinWindow::getSelectedOcrText() const {
-    if (m_selectedOcrIndices.empty()) return QString();
-    QString text;
-    int prevLine = -1;
-    for (int idx : m_selectedOcrIndices) {
-        if (idx < 0 || idx >= static_cast<int>(m_ocrWords.size())) continue;
-        const auto& w = m_ocrWords[idx];
-        if (prevLine != -1 && w.lineNum != prevLine) {
-            text += "\n";
-        } else if (prevLine != -1 && !text.isEmpty() && !text.endsWith("\n") && !text.endsWith(" ")) {
-            bool isAsciiA = text.back().toLatin1() > 0 && !text.back().isSpace();
-            bool isAsciiB = !w.text.isEmpty() && w.text.front().toLatin1() > 0;
-            if (isAsciiA && isAsciiB) {
-                text += " ";
-            }
-        }
-        text += w.text;
-        prevLine = w.lineNum;
-    }
-    return text;
+    return m_ocrModel.selectedText();
 }
 
 QRect PinWindow::getSelectedOcrVisualBoundingRect() const {
-    auto rects = getContinuousHighlightRects();
-    if (rects.isEmpty()) return QRect();
-    QRect united = rects[0];
-    for (int i = 1; i < rects.size(); ++i) {
-        united = united.united(rects[i]);
-    }
-    return united;
+    if (m_pixmap.width() <= 0 || m_pixmap.height() <= 0) return QRect();
+    QRect contentRect = rect().adjusted(4, 4, -4, -4);
+    const qreal dpr = m_pixmap.devicePixelRatio() > 0.0 ? m_pixmap.devicePixelRatio() : 1.0;
+    const qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
+    const qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
+    const QRect u = m_ocrModel.selectedBoundingRect();
+    if (u.isNull()) return QRect();
+    return QRect(
+        contentRect.left() + static_cast<int>(u.left() * scaleX),
+        contentRect.top() + static_cast<int>(u.top() * scaleY),
+        std::max(1, static_cast<int>(u.width() * scaleX)),
+        std::max(1, static_cast<int>(u.height() * scaleY))
+    );
 }
 
 void PinWindow::updateTextBubble() {
-    if (m_selectedOcrIndices.empty()) {
+    if (!m_ocrModel.hasSelection()) {
         if (m_textBubble) {
             m_textBubble->hideBubble();
         }
@@ -450,7 +267,7 @@ void PinWindow::paintEvent(QPaintEvent* event) {
     painter.drawPixmap(contentRect, m_pixmap);
 
     // Render continuous OCR highlight overlays whenever text is selected or hovered
-    if ((!m_selectedOcrIndices.empty() || m_hoveredOcrIndex != -1) && m_pixmap.width() > 0 && m_pixmap.height() > 0) {
+    if ((m_ocrModel.hasSelection() || m_ocrModel.hoveredIndex() != -1) && m_pixmap.width() > 0 && m_pixmap.height() > 0) {
         const qreal dpr = m_pixmap.devicePixelRatio();
         qreal scaleX = static_cast<qreal>(contentRect.width()) / (m_pixmap.width() / dpr);
         qreal scaleY = static_cast<qreal>(contentRect.height()) / (m_pixmap.height() / dpr);
@@ -464,10 +281,9 @@ void PinWindow::paintEvent(QPaintEvent* event) {
         }
 
         // B. Hovered word box
-        if (m_hoveredOcrIndex >= 0 && m_hoveredOcrIndex < static_cast<int>(m_ocrWords.size())) {
-            bool alreadySel = std::find(m_selectedOcrIndices.begin(), m_selectedOcrIndices.end(), m_hoveredOcrIndex) != m_selectedOcrIndices.end();
-            if (!alreadySel) {
-                const auto& item = m_ocrWords[m_hoveredOcrIndex];
+        if (m_ocrModel.hoveredIndex() >= 0 && m_ocrModel.hoveredIndex() < m_ocrModel.wordCount()) {
+            if (!m_ocrModel.isSelected(m_ocrModel.hoveredIndex())) {
+                const auto& item = m_ocrModel.word(m_ocrModel.hoveredIndex());
                 QRect wr(
                     contentRect.left() + static_cast<int>(item.logicalRect.left() * scaleX),
                     contentRect.top() + static_cast<int>(item.logicalRect.top() * scaleY),
@@ -511,7 +327,7 @@ void PinWindow::mousePressEvent(QMouseEvent* event) {
             m_isSelectingText = true;
             m_textSelectStart = event->pos();
             m_textSelectAnchorIndex = hitWord;
-            m_selectedOcrIndices = { hitWord };
+            m_ocrModel.selectSingle(hitWord);
             if (m_textBubble) {
                 m_textBubble->hideBubble();
             }
@@ -521,8 +337,8 @@ void PinWindow::mousePressEvent(QMouseEvent* event) {
         }
 
         // 4. Clicked outside text: clear selection if any
-        if (!m_selectedOcrIndices.empty()) {
-            m_selectedOcrIndices.clear();
+        if (m_ocrModel.hasSelection()) {
+            m_ocrModel.clearSelection();
             m_textSelectAnchorIndex = -1;
             if (m_textBubble) {
                 m_textBubble->hideBubble();
@@ -582,15 +398,15 @@ void PinWindow::mouseMoveEvent(QMouseEvent* event) {
         // Seamless text detection: show IBeamCursor when hovering over OCR words
         int hitWord = findOcrWordAt(event->pos());
         if (hitWord != -1) {
-            if (m_hoveredOcrIndex != hitWord) {
-                m_hoveredOcrIndex = hitWord;
+            if (m_ocrModel.hoveredIndex() != hitWord) {
+                m_ocrModel.setHoveredIndex(hitWord);
                 update();
             }
             setCursor(Qt::IBeamCursor);
             return;
         } else {
-            if (m_hoveredOcrIndex != -1) {
-                m_hoveredOcrIndex = -1;
+            if (m_ocrModel.hoveredIndex() != -1) {
+                m_ocrModel.setHoveredIndex(-1);
                 update();
             }
             setCursor(Qt::SizeAllCursor);
@@ -603,7 +419,7 @@ void PinWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         if (m_isSelectingText) {
             m_isSelectingText = false;
-            if (!m_selectedOcrIndices.empty()) {
+            if (m_ocrModel.hasSelection()) {
                 updateTextBubble();
             } else if (m_textBubble) {
                 m_textBubble->hideBubble();
@@ -622,21 +438,8 @@ void PinWindow::mouseDoubleClickEvent(QMouseEvent* event) {
         int hitWord = findOcrWordAt(event->pos());
         if (hitWord != -1) {
             // Select entire line
-            const auto& w = m_ocrWords[hitWord];
-            m_selectedOcrIndices.clear();
-            if (!m_ocrLines.empty() && w.lineIndex >= 0 && w.lineIndex < static_cast<int>(m_ocrLines.size())) {
-                for (int wIdx : m_ocrLines[w.lineIndex].wordIndices) {
-                    m_selectedOcrIndices.push_back(wIdx);
-                }
-            } else {
-                int targetLine = w.lineNum;
-                for (size_t i = 0; i < m_ocrWords.size(); ++i) {
-                    if (m_ocrWords[i].lineNum == targetLine) {
-                        m_selectedOcrIndices.push_back(static_cast<int>(i));
-                    }
-                }
-            }
-            m_textSelectAnchorIndex = m_selectedOcrIndices.empty() ? -1 : m_selectedOcrIndices.front();
+            m_ocrModel.selectLineOf(hitWord);
+            m_textSelectAnchorIndex = m_ocrModel.selectedIndices().empty() ? -1 : m_ocrModel.selectedIndices().front();
             updateTextBubble();
             update();
             event->accept();
@@ -671,7 +474,7 @@ void PinWindow::wheelEvent(QWheelEvent* event) {
 void PinWindow::contextMenuEvent(QContextMenuEvent* event) {
     QMenu menu(this);
 
-    if (!m_selectedOcrIndices.empty()) {
+    if (m_ocrModel.hasSelection()) {
         menu.addAction("复制选中文字 (Ctrl+C)", [this]() {
             QGuiApplication::clipboard()->setText(getSelectedOcrText());
         });
@@ -682,7 +485,7 @@ void PinWindow::contextMenuEvent(QContextMenuEvent* event) {
     ocrAction->setShortcut(QKeySequence(Qt::Key_T));
 
     auto* copyOcrAction = menu.addAction("复制所有文字 (Ctrl+Shift+C)", this, &PinWindow::copyAllOcrText);
-    if (!m_ocrReady || m_fullOcrText.isEmpty()) {
+    if (!m_ocrReady || m_ocrModel.fullText().isEmpty()) {
         copyOcrAction->setEnabled(false);
     }
 
@@ -714,18 +517,18 @@ void PinWindow::contextMenuEvent(QContextMenuEvent* event) {
 
 void PinWindow::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Escape || event->matches(QKeySequence::Close)) {
-        if (!m_selectedOcrIndices.empty()) {
-            m_selectedOcrIndices.clear();
+        if (!m_ocrModel.hasSelection()) {
+            close();
+        } else {
+            m_ocrModel.clearSelection();
             m_textSelectAnchorIndex = -1;
             updateTextBubble();
             update();
-        } else {
-            close();
         }
     } else if (event->key() == Qt::Key_T) {
         openOcrDialog();
     } else if (event->matches(QKeySequence::Copy)) {
-        if (!m_selectedOcrIndices.empty()) {
+        if (m_ocrModel.hasSelection()) {
             QGuiApplication::clipboard()->setText(getSelectedOcrText());
         } else {
             copyToClipboard();
@@ -741,14 +544,17 @@ void PinWindow::keyPressEvent(QKeyEvent* event) {
 
 void PinWindow::moveEvent(QMoveEvent* event) {
     QWidget::moveEvent(event);
-    if (m_textBubble && m_textBubble->isVisible() && !m_selectedOcrIndices.empty()) {
+    if (m_textBubble && m_textBubble->isVisible() && m_ocrModel.hasSelection()) {
         updateTextBubble();
     }
 }
 
 void PinWindow::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-    if (m_textBubble && m_textBubble->isVisible() && !m_selectedOcrIndices.empty()) {
+    if (qEnvironmentVariableIsSet("FOURYSHOT_OCR_DEBUG")) {
+        qInfo() << "[Pin] frameGeometry" << frameGeometry() << "cursor" << QCursor::pos();
+    }
+    if (m_textBubble && m_textBubble->isVisible() && m_ocrModel.hasSelection()) {
         updateTextBubble();
     }
 }
@@ -761,8 +567,8 @@ void PinWindow::hideEvent(QHideEvent* event) {
 }
 
 void PinWindow::leaveEvent(QEvent* event) {
-    if (m_hoveredOcrIndex != -1) {
-        m_hoveredOcrIndex = -1;
+    if (m_ocrModel.hoveredIndex() != -1) {
+        m_ocrModel.setHoveredIndex(-1);
         update();
     }
     QWidget::leaveEvent(event);

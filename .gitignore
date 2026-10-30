@@ -1,2 +1,21 @@
+# IDE
 /.idea
+/.vscode
+*.user
+
+# Build artifacts
+/build/
+*.o
+*.deb
+
+# Models (downloaded separately, see models/README or docs)
 /models
+
+# Debug logs
+*.log
+
+# Qt / CMake generated
+CMakeLists.txt.user
+.qtc_clangd/
+compile_commands.json
+.cache/

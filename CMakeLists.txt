@@ -20,6 +20,8 @@ set(SOURCES
     src/core/app.cpp
     src/core/ocr_service.h
     src/core/ocr_service.cpp
+    src/core/ocr_text_model.h
+    src/core/ocr_text_model.cpp
     src/platform/capture_manager.h
     src/platform/capture_manager.cpp
     src/platform/window_keep_above.h
